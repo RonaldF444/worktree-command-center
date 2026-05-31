@@ -11,7 +11,7 @@ import { ChatTile } from './chat-tile';
 import { settledLayout, centeredLayout, keyForIndex, keyToIndex } from './bubble-layout';
 import { emptyState, applyKeystroke, onReady as rqReady, onSubmit as rqSubmit, onClose as rqClose, onClick as rqClick, cycleNext as rqCycleNext, cyclePrev as rqCyclePrev } from './ready-queue';
 
-interface RepoConfig { name: string; path: string; remote?: string; group?: string; }
+export interface RepoConfig { name: string; path: string; remote?: string; group?: string; }
 
 export interface GridDeps {
 	repos: RepoConfig[];
