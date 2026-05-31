@@ -1,4 +1,3 @@
-import { App, Notice } from 'obsidian';
 import { spawn } from 'child_process';
 import * as fs from 'fs/promises';
 import * as path from 'path';
@@ -9,11 +8,23 @@ import { TerminalTile } from './terminal-tile';
 import { BoardView } from './board-view';
 import { ChatRoom } from './chat-room';
 import { ChatTile } from './chat-tile';
-import { TopicPromptModal } from '../topic-prompt-modal';
 import { settledLayout, centeredLayout, keyForIndex, keyToIndex } from './bubble-layout';
 import { emptyState, applyKeystroke, onReady as rqReady, onSubmit as rqSubmit, onClose as rqClose, onClick as rqClick, cycleNext as rqCycleNext, cyclePrev as rqCyclePrev } from './ready-queue';
 
 interface RepoConfig { name: string; path: string; remote?: string; group?: string; }
+
+export interface GridDeps {
+	repos: RepoConfig[];
+	coordDir: string;
+	sidecarPath: string;
+	notifyScriptPath: string;
+	coordHookPath: string;
+	sessionsFile: string;
+	group: string;
+	bypassPermissions: boolean;
+	toast: (msg: string) => void;
+	promptForTopic: (title: string, placeholder: string, initial?: string, okLabel?: string) => Promise<string | null>;
+}
 interface SessionRecord { worktreePath: string; branch: string; repoName: string; repoPath: string; baseBranch: string; name?: string; }
 
 /** Controls bar + a bubbling stage of embedded claude terminals, scoped to one repo group. */
@@ -52,12 +63,12 @@ export class TerminalsGrid {
 	private coordWatcher: import('fs').FSWatcher | null = null;
 	private scanDebounce: number | null = null;
 
-	constructor(private app: App, private vaultPath: string, private group: string) {
-		this.sidecarPath = path.join(vaultPath, '.obsidian', 'plugins', 'claude-os-command-center', 'pty-sidecar', 'sidecar.cjs');
-		this.notifyScriptPath = path.join(vaultPath, '.obsidian', 'plugins', 'claude-os-command-center', 'pty-sidecar', 'notify-ready.cjs');
-		this.sessionsFile = path.join(vaultPath, '.obsidian', 'plugins', 'claude-os-command-center', '.terminal-sessions.json');
-		this.coordDir = path.join(vaultPath, '00-dashboard', '.coordination', group);
-		this.coordHookPath = path.join(vaultPath, '.obsidian', 'plugins', 'claude-os-command-center', 'pty-sidecar', 'coord-hook.cjs');
+	constructor(private deps: GridDeps) {
+		this.sidecarPath = deps.sidecarPath;
+		this.notifyScriptPath = deps.notifyScriptPath;
+		this.sessionsFile = deps.sessionsFile;
+		this.coordDir = deps.coordDir;
+		this.coordHookPath = deps.coordHookPath;
 	}
 
 	/** Mount the grid into a page container. Sessions PERSIST across mounts (tab switches):
@@ -76,9 +87,9 @@ export class TerminalsGrid {
 
 		const newBranchBtn = controls.createEl('button', { text: '+ New branch' });
 		newBranchBtn.addEventListener('click', () => {
-			new TopicPromptModal(this.app, 'New branch', 'branch name (based on the selected branch)', (name) => {
-				if (name && name.trim()) { this.pendingNewBranch = name.trim(); new Notice(`Next Play creates branch "${name.trim()}"`); }
-			}, '', 'Create').open();
+			void this.deps.promptForTopic('New branch', 'branch name (based on the selected branch)', '', 'Create').then((name) => {
+				if (name && name.trim()) { this.pendingNewBranch = name.trim(); this.deps.toast(`Next Play creates branch "${name.trim()}"`); }
+			});
 		});
 
 		const play = controls.createEl('button', { text: '▶ Play', cls: 'cos-play-btn' });
@@ -196,10 +207,7 @@ export class TerminalsGrid {
 	}
 
 	private async loadRepos(): Promise<void> {
-		try {
-			const raw = JSON.parse(await fs.readFile(path.join(this.vaultPath, '00-dashboard', '.repos.json'), 'utf8')) as RepoConfig[];
-			this.repos = raw.filter((r) => (r.group ?? '') === this.group);
-		} catch { this.repos = []; }
+		this.repos = this.deps.repos;
 	}
 
 	private selectedRepo(): RepoConfig | undefined {
@@ -220,7 +228,7 @@ export class TerminalsGrid {
 	private async play(): Promise<void> {
 		const repo = this.selectedRepo();
 		const base = this.branchSel?.value;
-		if (!repo || !base) { new Notice('Pick a repo and branch first'); return; }
+		if (!repo || !base) { this.deps.toast('Pick a repo and branch first'); return; }
 		const branches = await listBranches(repo.path);
 		const branch = this.pendingNewBranch ?? nextWorktreeBranch(branches, base);
 		this.pendingNewBranch = null;
@@ -232,19 +240,19 @@ export class TerminalsGrid {
 			void this.persist();
 			this.applyLayout();
 		} catch (e) {
-			new Notice(`Worktree failed: ${(e as Error).message}`, 8000);
+			this.deps.toast(`Worktree failed: ${(e as Error).message}`);
 		}
 	}
 
 	/** Open the repo selected in the dropdown in a VS Code window. */
 	private openInVSCode(): void {
 		const repo = this.selectedRepo();
-		if (!repo) { new Notice('Pick a repo first'); return; }
+		if (!repo) { this.deps.toast('Pick a repo first'); return; }
 		try {
 			spawn('code', [repo.path], { shell: true, windowsHide: true });
-			new Notice(`Opening ${repo.name} in VS Code…`, 3000);
+			this.deps.toast(`Opening ${repo.name} in VS Code…`);
 		} catch (e) {
-			new Notice(`View Code failed: ${(e as Error).message}`, 6000);
+			this.deps.toast(`View Code failed: ${(e as Error).message}`);
 		}
 	}
 
@@ -278,7 +286,7 @@ export class TerminalsGrid {
 	/** Open a chat tile in the stage over the selected terminals. */
 	private openChat(): void {
 		const selected = this.tiles.filter((t) => t.isSelected);
-		if (selected.length < 2) { new Notice('Select at least 2 terminals first'); return; }
+		if (selected.length < 2) { this.deps.toast('Select at least 2 terminals first'); return; }
 		const members = selected.map((t) => ({
 			name: t.name,
 			sendLine: (s: string) => t.sendLine(s),
@@ -287,9 +295,9 @@ export class TerminalsGrid {
 			recentOutput: () => t.recentOutput(),
 		}));
 		this.chatTile?.unmount();
-		// Bypass-permission groups (cardtzar) never see a real Claude approval prompt, so
+		// Bypass-permission groups never see a real Claude approval prompt, so
 		// don't surface input-request cards there — they'd all be phantoms from conversation.
-		const room = new ChatRoom(this.coordDir, members, this.group !== 'cardtzar');
+		const room = new ChatRoom(this.coordDir, members, !this.deps.bypassPermissions);
 		this.chatRoom = room;
 		const id = this.nextTileId++;
 		this.chatTile = new ChatTile(id, room, () => this.closeChat(), () => this.centerChat());
@@ -395,11 +403,11 @@ export class TerminalsGrid {
 			sidecarPath: this.sidecarPath,
 			coordDir: this.coordDir,
 			resume,
-			bypassPermissions: this.group === 'cardtzar', // CardTzar agents run with no approval prompts
+			bypassPermissions: this.deps.bypassPermissions,
 			name,
 			onRename: () => { void this.persist(); },
 			onRequestRename: (t, cur) => {
-				new TopicPromptModal(this.app, 'Rename terminal', 'New name', (name) => { if (name && name.trim()) t.setName(name.trim()); }, cur, 'Rename').open();
+				void this.deps.promptForTopic('Rename terminal', 'New name', cur, 'Rename').then((name) => { if (name && name.trim()) t.setName(name.trim()); });
 			},
 			onClosed: (t) => { const wasCentered = this.centeredId === t.tileId; const r = rqClose(this.q, t.tileId, wasCentered); this.q = r.state; this.tiles = this.tiles.filter((x) => x !== t); void this.persist(); if (r.center !== null) this.doCenter(r.center); else { if (wasCentered) this.centeredId = null; this.applyLayout(); } },
 			onCenter: (t) => this.handleClick(t.tileId),
@@ -420,14 +428,14 @@ export class TerminalsGrid {
 	/** Persist THIS group's currently-open sessions (called on play + on close). */
 	private async persist(): Promise<void> {
 		const all = await this.readAllSessions();
-		all[this.group] = this.tiles.map((t) => t.sessionRecord());
+		all[this.deps.group] = this.tiles.map((t) => t.sessionRecord());
 		try { await fs.writeFile(this.sessionsFile, JSON.stringify(all, null, 2), 'utf8'); } catch { /* best effort */ }
 	}
 
 	/** On open: re-create a tile (claude --continue) for each persisted worktree that still exists. */
 	private async restoreSessions(): Promise<void> {
 		const all = await this.readAllSessions();
-		const recs = all[this.group] ?? [];
+		const recs = all[this.deps.group] ?? [];
 		for (const rec of recs) {
 			let exists = false;
 			try { await fs.access(rec.worktreePath); exists = true; } catch { exists = false; }
@@ -511,7 +519,7 @@ export class TerminalsGrid {
 	/** Un-park a parked worktree (soft-reset / recreate folder) and attach a new tile for it. */
 	private async reopenAndOpen(branch: string): Promise<void> {
 		const entry = this.lastEntries.find((e) => e.branch === branch);
-		if (!entry) { new Notice(`No scanned worktree for ${branch} — hit Refresh`); return; }
+		if (!entry) { this.deps.toast(`No scanned worktree for ${branch} — hit Refresh`); return; }
 		const repo = this.repos.find((r) => r.name === entry.repo);
 		if (!repo) return;
 		// Skip if a tile is already attached to this worktree.
