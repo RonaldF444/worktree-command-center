@@ -21,7 +21,7 @@ describe('slug / baseName / gitResource', () => {
   });
   it('derives the git resource from the target repo', () => {
     expect(core.gitResource('push', 'git push', '/repo/foo')).toBe('push:foo');
-    expect(core.gitResource('worktree-add', 'git -C "C:/x/CardzTzar" worktree add z', '/repo/foo')).toBe('worktree:CardzTzar');
+    expect(core.gitResource('worktree-add', 'git -C "C:/x/MyRepo" worktree add z', '/repo/foo')).toBe('worktree:MyRepo');
   });
 });
 

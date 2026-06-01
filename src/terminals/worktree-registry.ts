@@ -61,7 +61,7 @@ export interface WorktreeEntry {
 }
 
 const PARK_PREFIX = 'wip: auto-parked';
-export function parkCommitSubject(iso: string): string { return `${PARK_PREFIX} ${iso} (Claude OS)`; }
+export function parkCommitSubject(iso: string): string { return `${PARK_PREFIX} ${iso} (Worktree Command Center)`; }
 export function isParkCommitSubject(subject: string): boolean { return String(subject).startsWith(PARK_PREFIX); }
 
 export function computeState(e: WorktreeEntry): 'clean' | 'dirty' | 'ahead' | 'parked' {

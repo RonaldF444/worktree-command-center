@@ -61,7 +61,7 @@ export class ChatRoom {
 	private answeredAt: Record<string, number> = {}; // name → ts of last answer, to avoid re-detecting a stale prompt
 	private armedTs = 0; // 0 until the first broadcast — gates pause-for-input so opening/priming never hijacks
 
-	// surfacePrompts=false for bypass-permission groups (e.g. cardtzar runs with
+	// surfacePrompts=false for bypass-permission groups (e.g. one launched with
 	// --dangerously-skip-permissions): no Claude approval prompt ever appears, so an
 	// input-request card there is always a phantom — don't detect them at all.
 	constructor(private coordDir: string, private members: ChatMember[], private surfacePrompts = true) {}

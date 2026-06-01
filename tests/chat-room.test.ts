@@ -64,7 +64,7 @@ describe('looksLikePrompt', () => {
     expect(looksLikePrompt('Bash command requires approval to run')).toBe(true);
   });
   it('does NOT fire on conversation that merely contains a question or a list', () => {
-    // The exact messages that spammed the cardtzar group chat on 2026-05-31:
+    // Conversational messages that must NOT be mistaken for a prompt:
     expect(looksLikePrompt('is the uncommitted work in the predictor PRIMARY yours?')).toBe(false);
     expect(looksLikePrompt('@Improver 1 what are you touching? and roughly how long?')).toBe(false);
     expect(looksLikePrompt('which model should I use?')).toBe(false);

@@ -26,8 +26,8 @@ describe('defaultBranch', () => {
 
 describe('worktreePathFor', () => {
 	it('places worktrees under the repo parent .claude-worktrees/<repo>/<branch-slug>', () => {
-		const p = worktreePathFor('C:/Users/User/Dev/Cardtzar/Paper-Trader', 'paper-trader', 'wt/main-1');
-		expect(p.replace(/\\/g, '/')).toBe('C:/Users/User/Dev/Cardtzar/.claude-worktrees/paper-trader/wt-main-1');
+		const p = worktreePathFor('/home/dev/projects/my-app', 'my-app', 'wt/main-1');
+		expect(p.replace(/\\/g, '/')).toBe('/home/dev/projects/.claude-worktrees/my-app/wt-main-1');
 	});
 });
 
@@ -43,8 +43,8 @@ import { settingsLocalJson, terminalSystemPrompt } from '../src/terminals/worktr
 
 describe('terminalSystemPrompt', () => {
 	it('states identity, parallelism, and the cross-repo worktree rule', () => {
-		const p = terminalSystemPrompt('paper-trader', 'wt/main-1', 'C:/wt/paper-trader/wt-main-1');
-		expect(p).toContain('paper-trader');
+		const p = terminalSystemPrompt('my-app', 'wt/main-1', 'C:/wt/paper-trader/wt-main-1');
+		expect(p).toContain('my-app');
 		expect(p).toContain('wt/main-1');
 		expect(p).toContain('C:/wt/paper-trader/wt-main-1');
 		expect(p.toLowerCase()).toContain('same time'); // other terminals likely open concurrently
@@ -52,15 +52,14 @@ describe('terminalSystemPrompt', () => {
 		expect(p).toContain('git worktree add'); // tells it how to work in another repo
 	});
 	it('teaches the cos-coord coordination protocol', () => {
-		const p = terminalSystemPrompt('paper-trader', 'wt/main-1', 'C:/wt/paper-trader/wt-main-1');
+		const p = terminalSystemPrompt('my-app', 'wt/main-1', 'C:/wt/paper-trader/wt-main-1');
 		expect(p).toContain('cos-coord');
 		expect(p.toLowerCase()).toContain('acquire');
 	});
-	it('teaches the worktrees.md ledger and the wiki-content rule', () => {
-		const p = terminalSystemPrompt('paper-trader', 'wt/main-1', 'C:/wt/paper-trader/wt-main-1');
+	it('teaches the worktrees.md ledger', () => {
+		const p = terminalSystemPrompt('my-app', 'wt/main-1', 'C:/wt/paper-trader/wt-main-1');
 		expect(p).toContain('worktrees.md');
 		expect(p.toLowerCase()).toContain('in-flight');
-		expect(p.toLowerCase()).toContain('wiki_update');
 	});
 });
 

@@ -37,7 +37,7 @@ export function shouldRemoveWorktree(statusPorcelain: string, revListCount: numb
  *  what it is, that sibling terminals share the repo, and the cross-repo rule. */
 export function terminalSystemPrompt(repoName: string, branch: string, worktreePath: string): string {
 	return [
-		'You are a Claude Code session running inside a dedicated git worktree that was created for you by the "Worktree Terminals" dashboard (an Obsidian plugin). Keep these facts in mind for the whole session:',
+		'You are a Claude Code session running inside a dedicated git worktree that was created for you by the Worktree Command Center app. Keep these facts in mind for the whole session:',
 		'',
 		`- Identity: you are working in repo "${repoName}", on branch "${branch}", in the working directory "${worktreePath}". This worktree is yours — do your work here, on this branch.`,
 		`- Parallelism: other Claude Code terminals are very likely open AT THE SAME TIME in this same "${repoName}" repo, each on its own separate worktree and branch. You are not the only one working in this repo. Do not assume exclusive ownership, expect branches and worktrees you did not create, and prefer rebasing/merging over assuming a clean shared state.`,
@@ -45,11 +45,10 @@ export function terminalSystemPrompt(repoName: string, branch: string, worktreeP
 		'',
 		'Coordinating with the other terminals (they share resources with you):',
 		'- A `cos-coord` command is on your PATH. Before any DESTRUCTIVE or EXCLUSIVE operation on a shared resource (a DB reset, a backtest/replay, an A/B run, a migration), first run `cos-coord status` to see what is active.',
-		'- Then wrap the operation in a lock: `cos-coord acquire <area>:<thing> --reason "..." [--ttl <seconds>] && <your command> ; cos-coord release <area>:<thing>`. Resource names are lowercase `<area>:<thing>`, e.g. `paper-trader:db`. If acquire fails, another terminal holds it — wait and retry, do not force it.',
+		'- Then wrap the operation in a lock: `cos-coord acquire <area>:<thing> --reason "..." [--ttl <seconds>] && <your command> ; cos-coord release <area>:<thing>`. Resource names are lowercase `<area>:<thing>`, e.g. `db:reset`. If acquire fails, another terminal holds it — wait and retry, do not force it.',
 		'- When a long task finishes, run `cos-coord note "..."` so other terminals stop waiting.',
 		'- `git push` and `git worktree add` are locked for you automatically; if one is denied, wait a few seconds and retry.',
 		'- `<coordDir>/worktrees.md` is the shared ledger of everyone\'s in-flight work — read it to see what other terminals have uncommitted before you touch shared files. Abandoned work is auto-parked as `wip:` commits on its branch.',
-		'- Wiki: edit wiki CONTENT with the `wiki_update` tool, never by hand-editing pages in a worktree. For a big multi-step wiki edit you may `cos-coord acquire wiki:<page>` first.',
 	].join('\n');
 }
 
