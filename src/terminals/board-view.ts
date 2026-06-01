@@ -61,23 +61,38 @@ export class BoardView {
 		if (!this.registryEl || !this.locksEl || !this.feedEl) return;
 		const now = Date.now();
 
-		// Registry section (worktrees.md) — rendered above the event log.
-		const registryLines = this.readRegistry();
+		// Registry section (worktrees.md) — parse the markdown into clean styled rows
+		// (a repo heading per `## repo`, a row per `- <branch> <badge> …`), not raw text.
 		this.registryEl.empty();
-		for (const line of registryLines) {
-			if (!line.trim()) continue;
-			const row = this.registryEl.createDiv({ cls: 'cos-coord-row' });
-			row.setText(line);
-			if (line.includes('[PARKED]')) {
-				// Extract branch name: the token right after "- " at the start of the line.
-				const m = line.match(/^-\s+(\S+)/);
-				const branch = m ? m[1] : null;
-				if (branch) {
+		for (const raw of this.readRegistry()) {
+			const t = raw.trim();
+			if (!t || t === '# Worktrees') continue;            // skip the H1 (the panel head covers it)
+			if (t.startsWith('## ')) {                           // repo heading
+				this.registryEl.createDiv({ cls: 'cos-reg-repo', text: t.slice(3) });
+				continue;
+			}
+			if (t.startsWith('_')) {                             // _No active worktrees._
+				this.registryEl.createSpan({ cls: 'cos-coord-empty', text: t.replace(/_/g, '') });
+				continue;
+			}
+			if (t.startsWith('- ')) {                            // a worktree row
+				const body = t.slice(2);
+				const branch = (body.match(/^(\S+)/)?.[1]) ?? body;
+				const state = body.includes('[DIRTY]') ? 'dirty'
+					: body.includes('[PARKED]') ? 'parked'
+					: body.includes('[ahead]') ? 'ahead' : 'clean';
+				const detail = body.slice(branch.length).trim()
+					.replace(/^\[(DIRTY|PARKED|ahead)\]\s*/i, '')
+					.replace(/^clean\s*/, '')
+					.replace(/^·\s*/, '')
+					.trim();
+				const row = this.registryEl.createDiv({ cls: 'cos-reg-row' });
+				row.createSpan({ cls: 'cos-reg-branch', text: branch });
+				row.createSpan({ cls: `cos-reg-badge ${state}`, text: state });
+				if (detail) row.createSpan({ cls: 'cos-reg-detail', text: detail });
+				if (state === 'parked') {
 					const btn = row.createEl('button', { text: 'Reopen', cls: 'cos-reopen-btn' });
-					btn.addEventListener('click', (e) => {
-						e.stopPropagation();
-						this.onReopen(branch);
-					});
+					btn.addEventListener('click', (e) => { e.stopPropagation(); this.onReopen(branch); });
 				}
 			}
 		}

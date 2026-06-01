@@ -114,8 +114,6 @@ export class TerminalsGrid {
 		const viewCode = controls.createEl('button', { text: '🧩 View Code' });
 		viewCode.addEventListener('click', () => this.openInVSCode());
 
-		this.maxBtn = controls.createEl('button', { text: this.maximized ? '⛶ Restore' : '⛶ Maximize', cls: 'cos-maximize-btn' });
-		this.maxBtn.addEventListener('click', () => this.setMaximized(!this.maximized));
 
 		const refreshBtn = controls.createEl('button', { text: '⟳ Refresh' });
 		refreshBtn.addEventListener('click', () => { void this.scanWorktrees().then(() => this.board?.refresh()); });
@@ -139,8 +137,6 @@ export class TerminalsGrid {
 			// Keep Escape inside the terminal: xterm (the focused target) gets it first and
 			// forwards it to Claude; stopping it here prevents it bubbling to Obsidian.
 			this.stageEl.addEventListener('keydown', (e) => { if (e.key === 'Escape') e.stopPropagation(); });
-			const restoreBtn = this.stageEl.createEl('button', { text: '⤡ Minimize', cls: 'cos-stage-restore' });
-			restoreBtn.addEventListener('click', () => this.setMaximized(false));
 			await this.refreshBranches();
 			await this.restoreSessions();
 		} else {

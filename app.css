@@ -1,0 +1,113 @@
+/* App-shell theme + layout. The copied styles.css was written for Obsidian and
+   references ~126 Obsidian theme variables that don't exist in plain Electron — we
+   define a dark palette for them here so every .cos-* rule themes correctly. Loaded
+   AFTER styles.css so these win. */
+
+:root {
+	--background-primary: #0e0f17;
+	--background-primary-alt: #14151f;
+	--background-secondary: #171925;
+	--background-secondary-alt: #1f2130;
+	--background-modifier-border: #2a2d3e;
+	--background-modifier-border-hover: #3a3d52;
+	--background-modifier-hover: #232636;
+	--background-modifier-error: #4a2030;
+	--background-modifier-error-rgb: 248, 81, 73;
+	--background-modifier-success: #173a2a;
+	--text-normal: #e3e5ee;
+	--text-muted: #9aa0b4;
+	--text-faint: #6b7186;
+	--text-on-accent: #ffffff;
+	--interactive-accent: #5b73ff;
+	--interactive-accent-hover: #7286ff;
+	--cos-accent: #5b73ff;
+	--cos-accent-hover: #7286ff;
+	--color-green: #3fb950;
+	--color-red: #f85149;
+	--color-cyan: #39c5cf;
+	--color-yellow: #d6a93a;
+	--font-monospace: 'Cascadia Code', 'JetBrains Mono', Consolas, 'Courier New', monospace;
+	--vscode-scrollbar-shadow: rgba(0, 0, 0, 0.4);
+}
+
+html, body {
+	height: 100%;
+	margin: 0;
+	background: var(--background-primary);
+	color: var(--text-normal);
+	font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+	font-size: 13px;
+}
+
+#app {
+	height: 100vh;
+	display: flex;
+	flex-direction: column;
+	overflow: hidden;
+}
+
+/* Top bar (Add folder) */
+.wcc-topbar {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	padding: 8px 12px !important;
+	background: var(--background-secondary) !important;
+	border-bottom: 1px solid var(--background-modifier-border);
+	flex: 0 0 auto;
+}
+.wcc-topbar .wcc-brand { font-weight: 600; letter-spacing: 0.2px; color: var(--text-normal); }
+.wcc-topbar .wcc-status { color: var(--text-muted); font-size: 12px; }
+.wcc-topbar button,
+.wcc-grid-container button {
+	background: var(--background-secondary-alt);
+	color: var(--text-normal);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 6px;
+	padding: 5px 10px;
+	font-size: 12.5px;
+	cursor: pointer;
+	transition: background 0.12s, border-color 0.12s;
+}
+.wcc-topbar button:hover,
+.wcc-grid-container button:hover { background: var(--background-modifier-hover); border-color: var(--background-modifier-border-hover); }
+.wcc-topbar .wcc-add { background: var(--interactive-accent); color: var(--text-on-accent); border-color: transparent; font-weight: 600; }
+.wcc-topbar .wcc-add:hover { background: var(--interactive-accent-hover); }
+
+/* The grid fills the rest; its stage needs real height for the tile layout. */
+.wcc-grid-container { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; position: relative; }
+.cos-terminals-controls { flex: 0 0 auto; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 8px 12px; border-bottom: 1px solid var(--background-modifier-border); background: var(--background-primary-alt); }
+.cos-terminals-controls select { background: var(--background-secondary-alt); color: var(--text-normal); border: 1px solid var(--background-modifier-border); border-radius: 6px; padding: 5px 8px; }
+.cos-terminals-stage { flex: 1 1 auto; min-height: 0; position: relative; overflow: hidden; }
+
+/* Coordination board + worktree registry — clean rows, not raw markdown. */
+.cos-coord-board { flex: 0 0 auto; max-height: 38vh; overflow-y: auto; background: var(--background-secondary); border-bottom: 1px solid var(--background-modifier-border); padding: 8px 12px; font-size: 12px; }
+.cos-coord-board.collapsed .cos-coord-registry,
+.cos-coord-board.collapsed .cos-coord-locks,
+.cos-coord-board.collapsed .cos-coord-feed { display: none; }
+.cos-coord-head { font-weight: 600; cursor: pointer; user-select: none; margin-bottom: 6px; color: var(--text-normal); }
+.cos-coord-head:hover { color: var(--cos-accent-hover); }
+
+.cos-coord-registry { display: flex; flex-direction: column; gap: 3px; margin-bottom: 8px; }
+.cos-reg-repo { color: var(--text-muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; margin-top: 6px; }
+.cos-reg-row { display: flex; align-items: center; gap: 8px; padding: 3px 6px; border-radius: 5px; }
+.cos-reg-row:hover { background: var(--background-modifier-hover); }
+.cos-reg-branch { font-family: var(--font-monospace); color: var(--text-normal); }
+.cos-reg-badge { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; padding: 1px 7px; border-radius: 999px; }
+.cos-reg-badge.clean  { background: rgba(154,160,180,0.18); color: var(--text-muted); }
+.cos-reg-badge.dirty  { background: rgba(214,169,58,0.20); color: var(--color-yellow); }
+.cos-reg-badge.ahead  { background: rgba(57,197,207,0.18); color: var(--color-cyan); }
+.cos-reg-badge.parked { background: rgba(91,115,255,0.22); color: var(--cos-accent-hover); }
+.cos-reg-detail { color: var(--text-faint); font-size: 11.5px; }
+.cos-reopen-btn { margin-left: auto; padding: 2px 9px !important; font-size: 11px !important; }
+
+.cos-coord-locks { display: flex; flex-wrap: wrap; gap: 6px; }
+.cos-coord-empty { color: var(--text-faint); font-style: italic; }
+.cos-coord-lock { font-family: var(--font-monospace); font-size: 11px; padding: 2px 8px; border-radius: 5px; background: var(--background-secondary-alt); }
+.cos-coord-lock.stale { opacity: 0.6; }
+.cos-coord-feed { display: flex; flex-direction: column; gap: 2px; margin-top: 8px; color: var(--text-muted); font-size: 11.5px; }
+.cos-coord-feed .cos-coord-row { padding: 1px 0; }
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: var(--background-modifier-border); border-radius: 6px; }
+::-webkit-scrollbar-thumb:hover { background: var(--background-modifier-border-hover); }
