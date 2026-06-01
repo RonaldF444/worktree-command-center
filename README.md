@@ -28,6 +28,14 @@ npm run dist       # build a Windows installer (release/)
 
 Requires Node 18+ and Git on PATH. Claude Code (`claude`) must be installed and on PATH.
 
+### Troubleshooting
+
+- **`Error: Electron failed to install correctly`** — on Windows + Node 24, Electron's
+  installer downloads the runtime but its `extract-zip` step fails silently. A
+  `postinstall` (`scripts/fix-electron.mjs`) re-extracts it with `Expand-Archive`
+  automatically; if you still hit it, run `node scripts/fix-electron.mjs` (or
+  `node node_modules/electron/install.js`) manually.
+
 ## License
 
 MIT © Ronald Fridlyand

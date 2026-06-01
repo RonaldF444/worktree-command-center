@@ -6,6 +6,7 @@
   "author": "Ronald Fridlyand",
   "main": "dist/main.js",
   "scripts": {
+    "postinstall": "node scripts/fix-electron.mjs",
     "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs",
     "start": "npm run build && electron .",
     "test": "vitest run",
