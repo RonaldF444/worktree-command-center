@@ -25,7 +25,6 @@ function createWindow(): void {
 	});
 
 	win.loadFile(path.join(__dirname, '..', 'index.html'));
-	if (!app.isPackaged) win.webContents.openDevTools({ mode: 'detach' }); // dev aid; off in the installer
 
 	// IPC: return resolved paths
 	ipcMain.handle('paths', () => ({ sidecarDir, userData }));
