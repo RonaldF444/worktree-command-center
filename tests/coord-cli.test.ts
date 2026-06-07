@@ -48,4 +48,19 @@ describe('cos-coord CLI', () => {
     expect(parts[1]).toBe('A');
     expect(parts[2]).toBe('hello team');
   });
+  it('tell is a no-op without COS_ROLE=god', () => {
+    execFileSync('node', [CLI, 'tell', 'A', 'hello'], {
+      env: { ...process.env, COS_COORD_DIR: dir, COS_TERMINAL_ID: '1', COS_TERMINAL_NAME: 'x' }, encoding: 'utf8',
+    });
+    expect(fs.existsSync(path.join(dir, 'god-outbox'))).toBe(false);
+  });
+  it('tell from GOD drops a message file', () => {
+    execFileSync('node', [CLI, 'tell', 'A', 'hello'], {
+      env: { ...process.env, COS_COORD_DIR: dir, COS_TERMINAL_ID: '0', COS_TERMINAL_NAME: 'GOD', COS_ROLE: 'god' }, encoding: 'utf8',
+    });
+    const files = fs.readdirSync(path.join(dir, 'god-outbox')).filter((f) => f.endsWith('.json'));
+    expect(files).toHaveLength(1);
+    const msg = JSON.parse(fs.readFileSync(path.join(dir, 'god-outbox', files[0]), 'utf8'));
+    expect(msg).toMatchObject({ target: 'A', message: 'hello' });
+  });
 });

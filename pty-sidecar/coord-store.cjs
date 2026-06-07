@@ -90,4 +90,18 @@ function appendChat(dir, terminal, message) {
   fs.appendFileSync(path.join(dir, 'chat.md'), core.formatChatLine({ ts: Date.now(), terminal, message }), 'utf8');
 }
 
-module.exports = { acquire, release, readLocks, readHolder, appendBoard, note, appendChat, sleepSync };
+// GOD-only: drop one message for a worker terminal. Atomic temp-file + rename so the
+// renderer's outbox watcher never reads a half-written file. One file per message.
+function tell(dir, target, message) {
+  const outbox = path.join(dir, 'god-outbox');
+  fs.mkdirSync(outbox, { recursive: true });
+  const ts = Date.now();
+  const rand = Math.random().toString(36).slice(2, 8);
+  const final = path.join(outbox, `${ts}-${rand}.json`);
+  const tmp = path.join(outbox, `.${ts}-${rand}.tmp`);
+  fs.writeFileSync(tmp, JSON.stringify({ ts, target, message }), 'utf8');
+  fs.renameSync(tmp, final);
+  return final;
+}
+
+module.exports = { acquire, release, readLocks, readHolder, appendBoard, note, appendChat, tell, sleepSync };

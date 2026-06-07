@@ -50,4 +50,14 @@ describe('coord-store', () => {
     expect(store.acquire(dir, 'a', holder(1), { waitMs: 0, now: 1 }).ok).toBe(true);
     expect(store.acquire(dir, 'b', holder(2), { waitMs: 0, now: 1 }).ok).toBe(true);
   });
+
+  it('tell writes one atomic JSON message into god-outbox', () => {
+    const file = store.tell(dir, 'Improver 1', 'rebase please');
+    expect(fs.existsSync(file)).toBe(true);
+    const msg = JSON.parse(fs.readFileSync(file, 'utf8'));
+    expect(msg.target).toBe('Improver 1');
+    expect(msg.message).toBe('rebase please');
+    const files = fs.readdirSync(path.join(dir, 'god-outbox')).filter((f) => f.endsWith('.json'));
+    expect(files).toHaveLength(1); // no leftover .tmp
+  });
 });

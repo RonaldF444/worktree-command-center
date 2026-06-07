@@ -38,6 +38,14 @@ function main() {
     process.exit(0);
   }
 
+  if (cmd === 'tell') {
+    if (env('COS_ROLE') !== 'god') process.exit(0); // only GOD may inject into worker terminals
+    const target = resource;
+    const message = rest.join(' ');
+    if (target && message) store.tell(dir, target, message);
+    process.exit(0);
+  }
+
   if (cmd === 'acquire') {
     const waitMs = Number(env('COS_COORD_WAIT_MS', String(core.WAIT_MS)));
     const ttlMs = flag(rest, '--ttl') ? Number(flag(rest, '--ttl')) * 1000 : core.CLI_TTL_MS;
@@ -53,7 +61,7 @@ function main() {
     process.exit(0);
   }
 
-  console.error('usage: cos-coord <status|acquire|release|note> [resource] [--reason "…"] [--ttl <sec>]');
+  console.error('usage: cos-coord <status|acquire|release|note|chat|tell> [resource] [--reason "…"] [--ttl <sec>]');
   process.exit(0);
 }
 
