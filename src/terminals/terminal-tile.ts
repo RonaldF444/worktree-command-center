@@ -17,6 +17,7 @@ export interface TerminalTileOpts {
 	sidecarPath: string;
 	coordDir: string;
 	onClosed: (tile: TerminalTile) => void;
+	onHide?: (tile: TerminalTile) => void;
 	onCenter?: (tile: TerminalTile) => void;
 	onInput?: (tile: TerminalTile, data: string) => void;
 	onEnter?: (tile: TerminalTile) => void;
@@ -55,6 +56,8 @@ export class TerminalTile {
 		this.badgeEl = head.createSpan({ cls: 'cos-term-badge' });
 		this.nameEl = head.createSpan({ cls: 'cos-term-name', text: this.displayName, attr: { title: 'Double-click to rename' } });
 		this.nameEl.addEventListener('dblclick', (e) => { e.stopPropagation(); this.opts.onRequestRename?.(this, this.displayName); });
+		const hide = head.createEl('button', { text: '–', cls: 'cos-term-hide', attr: { title: 'Hide — keeps the session running; resurface from Coordination' } });
+		hide.addEventListener('click', (e) => { e.stopPropagation(); this.opts.onHide?.(this); });
 		const close = head.createEl('button', { text: '×', attr: { title: 'Close — deletes this worktree + its branch' } });
 		close.addEventListener('click', (e) => { e.stopPropagation(); void this.close(); });
 		// Click anywhere in the tile (header or terminal body, except the × button) centers it.
@@ -65,11 +68,24 @@ export class TerminalTile {
 		this.fit = new FitAddon();
 		this.term.loadAddon(this.fit);
 		this.term.open(body);
-		// Ctrl/Cmd+V pastes from the clipboard (xterm would otherwise send a literal ^V);
-		// Shift+Page/Arrow/Home/End scroll the scrollback. Everything else (plain nav keys
-		// included) passes through to Claude untouched.
+		// Ctrl/Cmd+C copies the selection if there is one (otherwise ^C falls through as an
+		// interrupt to Claude); Ctrl/Cmd+V pastes from the clipboard (xterm would otherwise
+		// send a literal ^V); Shift+Page/Arrow/Home/End scroll the scrollback. Everything else
+		// (plain nav keys included) passes through to Claude untouched.
 		this.term.attachCustomKeyEventHandler((e) => {
 			if (e.type !== 'keydown') return true;
+			if ((e.ctrlKey || e.metaKey) && (e.key === 'c' || e.key === 'C')) {
+				if (this.term?.hasSelection()) {
+					const sel = this.term.getSelection();
+					if (sel) {
+						e.preventDefault(); // copy instead of sending ^C (SIGINT)
+						this.writeClipboard(sel);
+						this.term.clearSelection();
+						return false;
+					}
+				}
+				return true; // no selection → let ^C through as an interrupt
+			}
 			if ((e.ctrlKey || e.metaKey) && (e.key === 'v' || e.key === 'V')) {
 				e.preventDefault(); // suppress the browser's own paste so we don't double-paste
 				this.pasteFromClipboard();
@@ -152,6 +168,14 @@ export class TerminalTile {
 
 	setCentered(on: boolean): void {
 		this.el?.toggleClass('centered', on);
+	}
+
+	/** Detach/re-attach the tile from the visible stage WITHOUT touching the session.
+	 *  Hidden tiles keep their claude process + xterm buffer alive in the background. */
+	setHidden(on: boolean): void {
+		if (!this.el) return;
+		this.el.style.display = on ? 'none' : '';
+		if (!on) this.fitSoon(); // re-show: the term was display:none, so refit to the stage
 	}
 
 	/** Give this terminal keyboard focus so typing goes here. */
