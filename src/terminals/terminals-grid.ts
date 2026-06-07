@@ -37,6 +37,7 @@ export class TerminalsGrid {
 	private controlsEl: HTMLElement | null = null;
 	private board: BoardView | null = null;
 	private tiles: TerminalTile[] = [];
+	private hidden: TerminalTile[] = [];
 	private nextTileId = 1;
 	private pendingNewBranch: string | null = null;
 	private lastEntries: WorktreeEntry[] = [];
@@ -390,6 +391,7 @@ export class TerminalsGrid {
 	}
 
 	private handleReady(t: TerminalTile): void {
+		if (this.hidden.includes(t)) return; // a hidden, background session never steals the center
 		if (this.chatRoom) { this.chatRoom.noteIdle(t.name); return; } // chat owns idle while open
 		const r = rqReady(this.q, t.tileId);
 		this.q = r.state;
@@ -397,10 +399,43 @@ export class TerminalsGrid {
 	}
 
 	private handleSubmit(t: TerminalTile): void {
+		if (this.hidden.includes(t)) return; // background sessions don't drive centering
 		const r = rqSubmit(this.q, t.tileId);
 		this.q = r.state;
 		// Locked: submitting doesn't pull the next terminal to center — centering stays manual.
 		if (!this.locked && r.center !== null) this.doCenter(r.center);
+	}
+
+	/** Hide a tile: pull it off the stage but keep its session + worktree alive.
+	 *  Resurface later with showTile() from the Coordination panel. */
+	private hideTile(tile: TerminalTile): void {
+		if (!this.tiles.includes(tile)) return;
+		const wasCentered = this.centeredId === tile.tileId;
+		this.tiles = this.tiles.filter((x) => x !== tile);
+		this.hidden.push(tile);
+		tile.setHidden(true);
+		tile.setSelected(false);          // a hidden tile is never a chat member
+		this.updateChatBtn();
+		const r = rqClose(this.q, tile.tileId, wasCentered); // drop from the ready-queue
+		this.q = r.state;
+		if (r.center !== null) this.doCenter(r.center);
+		else { if (wasCentered) this.centeredId = null; this.applyLayout(); }
+		void this.persist();
+		this.board?.refresh();
+	}
+
+	/** Resurface a hidden tile: put it back on the stage, centered + focused. */
+	private showTile(tileId: number): void {
+		const tile = this.hidden.find((t) => t.tileId === tileId);
+		if (!tile) return;
+		this.hidden = this.hidden.filter((t) => t !== tile);
+		this.tiles.push(tile);
+		tile.setHidden(false);
+		this.centeredId = tile.tileId;
+		this.applyLayout();
+		this.focusCentered();
+		void this.persist();
+		this.board?.refresh();
 	}
 
 	/** Build a tile with all the grid callbacks wired. `resume` → claude --continue. */
@@ -418,6 +453,7 @@ export class TerminalsGrid {
 				void this.deps.promptForTopic('Rename terminal', 'New name', cur, 'Rename').then((name) => { if (name && name.trim()) t.setName(name.trim()); });
 			},
 			onClosed: (t) => { const wasCentered = this.centeredId === t.tileId; const r = rqClose(this.q, t.tileId, wasCentered); this.q = r.state; this.tiles = this.tiles.filter((x) => x !== t); void this.persist(); if (r.center !== null) this.doCenter(r.center); else { if (wasCentered) this.centeredId = null; this.applyLayout(); } },
+			onHide: (t) => this.hideTile(t),
 			onCenter: (t) => this.handleClick(t.tileId),
 			onReady: (t) => this.handleReady(t),
 			onInput: (t, data) => { this.q.composingLen = applyKeystroke(this.q.composingLen, data); },
