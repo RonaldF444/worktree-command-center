@@ -34,7 +34,7 @@ async function main(): Promise<void> {
 			notifyScriptPath: path.join(sidecarDir, 'notify-ready.cjs'),
 			coordHookPath: path.join(sidecarDir, 'coord-hook.cjs'),
 			sessionsFile: path.join(userData, '.terminal-sessions.json'),
-			bypassPermissions: false,
+			bypassPermissions: true,
 			toast,
 			promptForTopic,
 		};
