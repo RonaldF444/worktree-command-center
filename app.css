@@ -82,6 +82,7 @@ html, body {
 
 /* Coordination board + worktree registry — clean rows, not raw markdown. */
 .cos-coord-board { flex: 0 0 auto; max-height: 38vh; overflow-y: auto; background: var(--background-secondary); border-bottom: 1px solid var(--background-modifier-border); padding: 8px 12px; font-size: 12px; }
+.cos-coord-board.collapsed .cos-coord-hidden,
 .cos-coord-board.collapsed .cos-coord-registry,
 .cos-coord-board.collapsed .cos-coord-locks,
 .cos-coord-board.collapsed .cos-coord-feed { display: none; }

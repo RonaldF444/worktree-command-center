@@ -8,14 +8,21 @@ export class BoardView {
 	private registryEl: HTMLElement | null = null;
 	private locksEl: HTMLElement | null = null;
 	private feedEl: HTMLElement | null = null;
+	private hiddenEl: HTMLElement | null = null;
 	private timer: number | null = null;
 
-	constructor(private coordDir: string, private onReopen: (branch: string) => void = () => {}) {}
+	constructor(
+		private coordDir: string,
+		private onReopen: (branch: string) => void = () => {},
+		private hiddenProvider: () => Array<{ tileId: number; name: string; branch: string }> = () => [],
+		private onShow: (tileId: number) => void = () => {},
+	) {}
 
 	mount(parent: HTMLElement): void {
 		this.el = parent.createDiv({ cls: 'cos-coord-board' });
 		const head = this.el.createDiv({ cls: 'cos-coord-head', text: '🛰 Coordination' });
 		head.addEventListener('click', () => this.el?.toggleClass('collapsed', !this.el.classList.contains('collapsed')));
+		this.hiddenEl = this.el.createDiv({ cls: 'cos-coord-hidden' });
 		this.registryEl = this.el.createDiv({ cls: 'cos-coord-registry' });
 		this.locksEl = this.el.createDiv({ cls: 'cos-coord-locks' });
 		this.feedEl = this.el.createDiv({ cls: 'cos-coord-feed' });
@@ -26,7 +33,7 @@ export class BoardView {
 	unmount(): void {
 		if (this.timer !== null) { window.clearInterval(this.timer); this.timer = null; }
 		this.el?.remove();
-		this.el = this.registryEl = this.locksEl = this.feedEl = null;
+		this.el = this.registryEl = this.locksEl = this.feedEl = this.hiddenEl = null;
 	}
 
 	/** Re-read worktrees.md + board.md and re-render everything. */
@@ -58,8 +65,22 @@ export class BoardView {
 	}
 
 	private renderAll(): void {
-		if (!this.registryEl || !this.locksEl || !this.feedEl) return;
+		if (!this.registryEl || !this.locksEl || !this.feedEl || !this.hiddenEl) return;
 		const now = Date.now();
+
+		// Hidden-terminals section (in-memory, provided by the grid). Resurface with Show.
+		this.hiddenEl.empty();
+		const hiddenList = this.hiddenProvider();
+		if (hiddenList.length) {
+			this.hiddenEl.createDiv({ cls: 'cos-reg-repo', text: 'Hidden' });
+			for (const h of hiddenList) {
+				const row = this.hiddenEl.createDiv({ cls: 'cos-reg-row' });
+				row.createSpan({ cls: 'cos-reg-branch', text: h.name });
+				if (h.branch && h.branch !== h.name) row.createSpan({ cls: 'cos-reg-detail', text: h.branch });
+				const btn = row.createEl('button', { text: 'Show', cls: 'cos-reopen-btn' });
+				btn.addEventListener('click', (e) => { e.stopPropagation(); this.onShow(h.tileId); });
+			}
+		}
 
 		// Registry section (worktrees.md) — parse the markdown into clean styled rows
 		// (a repo heading per `## repo`, a row per `- <branch> <badge> …`), not raw text.
