@@ -7,6 +7,7 @@ import { removeWorktreeAndBranch, terminalSystemPrompt, type WorktreeInfo } from
 import { parseStatusPorcelain } from './worktree-registry';
 import { runCommand } from '../command-runner';
 import { scrollIntentForKey, type ScrollIntent } from './scroll-keys';
+import { FitThrottle } from './fit-throttle';
 
 export interface TerminalTileOpts {
 	tileId: number;
@@ -37,6 +38,7 @@ export class TerminalTile {
 	private bridge: SessionBridge | null = null;
 	private el: HTMLElement | null = null;
 	private resizeObs: ResizeObserver | null = null;
+	private fitThrottle: FitThrottle | null = null;
 	private badgeEl: HTMLElement | null = null;
 	private readyWatcher: fs.FSWatcher | null = null;
 	private nameEl: HTMLElement | null = null;
@@ -106,6 +108,11 @@ export class TerminalTile {
 			} else {
 				this.pasteFromClipboard();
 			}
+		});
+		this.fitThrottle = new FitThrottle({
+			fit: () => this.fit?.fit(),
+			dims: () => ({ cols: this.term?.cols ?? 0, rows: this.term?.rows ?? 0 }),
+			resize: (cols, rows) => this.bridge?.resize(cols, rows),
 		});
 		this.fitSoon();
 
@@ -323,13 +330,9 @@ export class TerminalTile {
 		};
 	}
 
+	/** Coalesce resize bursts into a single fit + pty-resize (see FitThrottle). */
 	private fitSoon(): void {
-		window.setTimeout(() => {
-			try {
-				this.fit?.fit();
-				if (this.term) this.bridge?.resize(this.term.cols, this.term.rows);
-			} catch { /* not visible yet */ }
-		}, 30);
+		this.fitThrottle?.schedule();
 	}
 
 	/** Tear down the session + DOM WITHOUT touching the worktree (used on page switch). */
@@ -337,6 +340,8 @@ export class TerminalTile {
 		this.readyWatcher?.close();
 		this.readyWatcher = null;
 		this.resizeObs?.disconnect();
+		this.fitThrottle?.dispose();
+		this.fitThrottle = null;
 		this.bridge?.kill();
 		this.term?.dispose();
 		this.el?.remove();

@@ -5,6 +5,7 @@ import * as path from 'path';
 import { SessionBridge } from './session-bridge';
 import { godSystemPrompt, type GodRepo } from './god';
 import { scrollIntentForKey, type ScrollIntent } from './scroll-keys';
+import { FitThrottle } from './fit-throttle';
 
 export interface GodConsoleOpts {
 	repos: GodRepo[];
@@ -23,6 +24,7 @@ export class GodConsole {
 	private fit: FitAddon | null = null;
 	private bridge: SessionBridge | null = null;
 	private resizeObs: ResizeObserver | null = null;
+	private fitThrottle: FitThrottle | null = null;
 
 	constructor(private opts: GodConsoleOpts, private onHide: () => void) {}
 
@@ -82,6 +84,11 @@ export class GodConsole {
 			} else {
 				this.pasteFromClipboard();
 			}
+		});
+		this.fitThrottle = new FitThrottle({
+			fit: () => this.fit?.fit(),
+			dims: () => ({ cols: this.term?.cols ?? 0, rows: this.term?.rows ?? 0 }),
+			resize: (cols, rows) => this.bridge?.resize(cols, rows),
 		});
 		this.fitSoon();
 
@@ -154,10 +161,9 @@ export class GodConsole {
 		navigator.clipboard?.writeText?.(text).catch(() => { /* denied */ });
 	}
 
+	/** Coalesce resize bursts into a single fit + pty-resize (see FitThrottle). */
 	private fitSoon(): void {
-		window.setTimeout(() => {
-			try { this.fit?.fit(); if (this.term) this.bridge?.resize(this.term.cols, this.term.rows); } catch { /* not visible yet */ }
-		}, 30);
+		this.fitThrottle?.schedule();
 	}
 
 	/** Write GOD's appended system prompt to his home dir; return the path (or null). */
@@ -173,6 +179,7 @@ export class GodConsole {
 	/** Full teardown — kills the session. */
 	dispose(): void {
 		this.resizeObs?.disconnect(); this.resizeObs = null;
+		this.fitThrottle?.dispose(); this.fitThrottle = null;
 		this.bridge?.kill(); this.bridge = null;
 		this.term?.dispose(); this.term = null;
 		this.el?.remove(); this.el = this.bodyEl = null;
