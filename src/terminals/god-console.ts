@@ -51,6 +51,22 @@ export class GodConsole {
 				this.pasteFromClipboard();
 				return false;
 			}
+			// Copy: Ctrl/Cmd+Shift+C always copies the selection; plain Ctrl/Cmd+C copies ONLY
+			// when there is a selection — otherwise it must fall through to Claude as the
+			// interrupt (SIGINT), which is what Ctrl+C means in a terminal.
+			if ((e.ctrlKey || e.metaKey) && (e.key === 'c' || e.key === 'C')) {
+				const hasSel = !!this.term?.hasSelection();
+				if (e.shiftKey || hasSel) {
+					if (hasSel) {
+						const sel = this.term!.getSelection();
+						if (sel) this.writeClipboard(sel);
+						this.term!.clearSelection();
+					}
+					e.preventDefault();
+					return false;
+				}
+				return true; // no selection → let plain Ctrl+C through as interrupt
+			}
 			const intent = scrollIntentForKey(e);
 			if (!intent) return true;
 			this.applyScroll(intent);
