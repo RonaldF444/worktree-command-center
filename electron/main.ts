@@ -10,9 +10,15 @@ function createWindow(): void {
 		: path.join(__dirname, '..', 'pty-sidecar');
 	const userData = app.getPath('userData');
 
+	// App / taskbar icon. .ico (multi-size) on Windows for crisp small sizes; .png elsewhere.
+	// __dirname is dist/ in dev and inside app.asar when packaged — assets/ sits one level up in both.
+	const iconFile = process.platform === 'win32' ? 'icon.ico' : 'icon.png';
+	const iconPath = path.join(__dirname, '..', 'assets', iconFile);
+
 	win = new BrowserWindow({
 		width: 1400,
 		height: 900,
+		icon: iconPath,
 		webPreferences: {
 			nodeIntegration: true,
 			contextIsolation: false,
