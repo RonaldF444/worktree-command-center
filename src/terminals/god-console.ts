@@ -4,6 +4,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { SessionBridge } from './session-bridge';
 import { godSystemPrompt, type GodRepo } from './god';
+import { scrollIntentForKey, type ScrollIntent } from './scroll-keys';
 
 export interface GodConsoleOpts {
 	repos: GodRepo[];
@@ -40,6 +41,32 @@ export class GodConsole {
 		this.fit = new FitAddon();
 		this.term.loadAddon(this.fit);
 		this.term.open(this.bodyEl);
+		// Clipboard + scrollback keys, mirroring TerminalTile: Ctrl/Cmd+V pastes (xterm would
+		// otherwise send a literal ^V to Claude); Shift+Page/Arrow/Home/End scroll. Everything
+		// else passes through to Claude untouched.
+		this.term.attachCustomKeyEventHandler((e) => {
+			if (e.type !== 'keydown') return true;
+			if ((e.ctrlKey || e.metaKey) && (e.key === 'v' || e.key === 'V')) {
+				e.preventDefault(); // suppress the browser's own paste so we don't double-paste
+				this.pasteFromClipboard();
+				return false;
+			}
+			const intent = scrollIntentForKey(e);
+			if (!intent) return true;
+			this.applyScroll(intent);
+			return false;
+		});
+		// Right-click: copy the selection if there is one, otherwise paste.
+		this.bodyEl.addEventListener('contextmenu', (e) => {
+			e.preventDefault();
+			if (this.term?.hasSelection()) {
+				const sel = this.term.getSelection();
+				if (sel) this.writeClipboard(sel);
+				this.term.clearSelection();
+			} else {
+				this.pasteFromClipboard();
+			}
+		});
 		this.fitSoon();
 
 		const ctxFile = this.writeSystemPromptFile();
@@ -73,6 +100,43 @@ export class GodConsole {
 
 	focus(): void { this.term?.focus(); }
 	blur(): void { this.term?.blur(); }
+
+	/** Scroll this terminal's scrollback buffer per a keyboard scroll intent. */
+	private applyScroll(intent: ScrollIntent): void {
+		const t = this.term;
+		if (!t) return;
+		if (intent.kind === 'lines') t.scrollLines(intent.amount);
+		else if (intent.kind === 'pages') t.scrollPages(intent.amount);
+		else if (intent.kind === 'top') t.scrollToTop();
+		else t.scrollToBottom();
+	}
+
+	/** Electron's clipboard (reliable & synchronous), or null outside Electron. */
+	private electronClipboard(): { readText?: () => string; writeText?: (t: string) => void } | null {
+		try {
+			const req = (window as unknown as { require?: (m: string) => unknown }).require;
+			if (!req) return null;
+			const mod = req('electron') as { clipboard?: { readText?: () => string; writeText?: (t: string) => void } };
+			return mod.clipboard ?? null;
+		} catch { return null; }
+	}
+
+	/** Paste clipboard text into the terminal (honors bracketed-paste via term.paste). */
+	private pasteFromClipboard(): void {
+		const t = this.term;
+		if (!t) return;
+		const sync = this.electronClipboard()?.readText?.();
+		if (typeof sync === 'string') { if (sync) t.paste(sync); return; }
+		// Fallback for non-Electron runtimes: the async Clipboard API.
+		navigator.clipboard?.readText?.().then((txt) => { if (txt) t.paste(txt); }).catch(() => { /* denied / empty */ });
+	}
+
+	/** Copy text to the clipboard (used by right-click when there's a selection). */
+	private writeClipboard(text: string): void {
+		const clip = this.electronClipboard();
+		if (clip?.writeText) { clip.writeText(text); return; }
+		navigator.clipboard?.writeText?.(text).catch(() => { /* denied */ });
+	}
 
 	private fitSoon(): void {
 		window.setTimeout(() => {
