@@ -1,11 +1,13 @@
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
+import { WebLinksAddon } from '@xterm/addon-web-links';
 import * as fs from 'fs';
 import * as path from 'path';
 import { SessionBridge } from './session-bridge';
 import { godSystemPrompt, type GodRepo } from './god';
 import { scrollIntentForKey, type ScrollIntent } from './scroll-keys';
 import { FitThrottle } from './fit-throttle';
+import { ctrlClickActivator, openExternalUrl } from './links';
 
 export interface GodConsoleOpts {
 	repos: GodRepo[];
@@ -43,6 +45,8 @@ export class GodConsole {
 		this.fit = new FitAddon();
 		this.term.loadAddon(this.fit);
 		this.term.open(this.bodyEl);
+		// Ctrl/Cmd+click a URL to open it in the real browser.
+		this.term.loadAddon(new WebLinksAddon(ctrlClickActivator(openExternalUrl)));
 		// Clipboard + scrollback keys, mirroring TerminalTile: Ctrl/Cmd+V pastes (xterm would
 		// otherwise send a literal ^V to Claude); Shift+Page/Arrow/Home/End scroll. Everything
 		// else passes through to Claude untouched.

@@ -1,5 +1,6 @@
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
+import { WebLinksAddon } from '@xterm/addon-web-links';
 import * as fs from 'fs';
 import * as path from 'path';
 import { SessionBridge } from './session-bridge';
@@ -8,6 +9,7 @@ import { parseStatusPorcelain } from './worktree-registry';
 import { runCommand } from '../command-runner';
 import { scrollIntentForKey, type ScrollIntent } from './scroll-keys';
 import { FitThrottle } from './fit-throttle';
+import { ctrlClickActivator, openExternalUrl } from './links';
 
 export interface TerminalTileOpts {
 	tileId: number;
@@ -70,6 +72,8 @@ export class TerminalTile {
 		this.fit = new FitAddon();
 		this.term.loadAddon(this.fit);
 		this.term.open(body);
+		// Ctrl/Cmd+click a URL (e.g. http://localhost:5173) to open it in the real browser.
+		this.term.loadAddon(new WebLinksAddon(ctrlClickActivator(openExternalUrl)));
 		// Ctrl/Cmd+C copies the selection if there is one (otherwise ^C falls through as an
 		// interrupt to Claude); Ctrl/Cmd+V pastes from the clipboard (xterm would otherwise
 		// send a literal ^V); Shift+Page/Arrow/Home/End scroll the scrollback. Everything else
