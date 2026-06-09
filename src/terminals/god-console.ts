@@ -128,6 +128,13 @@ export class GodConsole {
 	focus(): void { this.term?.focus(); }
 	blur(): void { this.term?.blur(); }
 
+	/** Inject a line into Kane's session (text + a separated Enter so ConPTY can't coalesce
+	 *  them) — used to ping him when a watch fires. */
+	notify(text: string): void {
+		this.bridge?.write(text);
+		window.setTimeout(() => this.bridge?.write('\r'), 40);
+	}
+
 	/** Scroll this terminal's scrollback buffer per a keyboard scroll intent. */
 	private applyScroll(intent: ScrollIntent): void {
 		const t = this.term;
