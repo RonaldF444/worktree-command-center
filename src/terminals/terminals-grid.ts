@@ -13,8 +13,9 @@ import { settledLayout, centeredLayout, keyForIndex, keyToIndex } from './bubble
 import { emptyState, applyKeystroke, onReady as rqReady, onSubmit as rqSubmit, onClose as rqClose, onClick as rqClick, cycleNext as rqCycleNext, cyclePrev as rqCyclePrev } from './ready-queue';
 import { partitionByHidden } from './session-partition';
 import { GodConsole } from './god-console';
-import { slug as godSlug, formatFloorSnapshot, formatFloorIndex, parseTellRequest, resolveTellTarget } from './god';
+import { slug as godSlug, formatFloorSnapshot, formatFloorIndex, parseOutboxMessage, resolveTellTarget, type OutboxMessage } from './god';
 import { looksLikeMenu } from './prompt-detect';
+import { looksLikePrompt } from './chat-room';
 
 export interface RepoConfig { name: string; path: string; remote?: string; group?: string; }
 
@@ -57,6 +58,8 @@ export class TerminalsGrid {
 	private godBtn: HTMLButtonElement | null = null;
 	private godConsole: GodConsole | null = null;
 	private godVisible = false;
+	private watchers: Array<{ target: string; note: string }> = [];
+	private pendingTask = new Map<number, string>();
 	private stageWrapEl: HTMLElement | null = null;
 	private floorTimer: number | null = null;
 	private godOutboxWatcher: import('fs').FSWatcher | null = null;
@@ -263,19 +266,38 @@ export class TerminalsGrid {
 		const repo = this.selectedRepo();
 		const base = this.branchSel?.value;
 		if (!repo || !base) { this.deps.toast('Pick a repo and branch first'); return; }
-		const branches = await listBranches(repo.path);
-		const branch = this.pendingNewBranch ?? nextWorktreeBranch(branches, base);
-		this.pendingNewBranch = null;
+		await this.spawnWorktree(repo, base, {});
+	}
+
+	/** Shared spawn core: create a worktree + tile, render, persist, layout. Optionally queue an
+	 *  initial task to send once the new session is first ready. Returns the tile (or null). */
+	private async spawnWorktree(repo: RepoConfig, base: string, opts: { task?: string }): Promise<TerminalTile | null> {
 		try {
+			const branches = await listBranches(repo.path);
+			const branch = this.pendingNewBranch ?? nextWorktreeBranch(branches, base);
+			this.pendingNewBranch = null;
 			const worktree = await createWorktree(repo.path, repo.name, base, branch, this.notifyScriptPath, this.coordHookPath);
 			const tile = this.makeTile(worktree, repo.name, repo.path, base, false);
+			if (opts.task) this.pendingTask.set(tile.tileId, opts.task);
 			if (this.stageEl) tile.render(this.stageEl);
 			this.tiles.push(tile);
 			void this.persist();
 			this.applyLayout();
+			return tile;
 		} catch (e) {
 			this.deps.toast(`Worktree failed: ${(e as Error).message}`);
+			return null;
 		}
+	}
+
+	/** Kane asked to spawn a terminal: resolve the repo by name, default the base branch, start
+	 *  it on the given task. */
+	private async spawnFromKane(repoName: string, base: string | null, task: string): Promise<void> {
+		const repo = this.repos.find((r) => r.name === repoName)
+			?? this.repos.find((r) => r.name.toLowerCase() === repoName.toLowerCase());
+		if (!repo) { this.writeGodInbox(`cannot spawn — unknown repo "${repoName}". Known: ${this.repos.map((r) => r.name).join(', ') || '(none)'}`); return; }
+		const baseBranch = base ?? (defaultBranch(await listBranches(repo.path)) ?? 'main');
+		await this.spawnWorktree(repo, baseBranch, { task });
 	}
 
 	/** Open the repo selected in the dropdown in a VS Code window. */
@@ -460,14 +482,25 @@ export class TerminalsGrid {
 			const full = path.join(out, f);
 			let text = '';
 			try { text = fsSync.readFileSync(full, 'utf8'); } catch { continue; }
-			const req = parseTellRequest(text);
-			if (req) {
-				const name = resolveTellTarget(req.target, names);
-				const tile = name ? sessions.find((t) => t.name === name) : undefined;
-				if (tile) tile.sendLine(req.message);
-				else this.writeGodInbox(`could not deliver to "${req.target}" — not a live terminal. Live: ${names.join(', ') || '(none)'}`);
-			}
+			const msg = parseOutboxMessage(text);
+			if (msg) this.dispatchOutbox(msg, names);
 			try { fsSync.renameSync(full, path.join(done, f)); } catch { try { fsSync.unlinkSync(full); } catch { /* ignore */ } }
+		}
+	}
+
+	/** Act on one parsed Kane command (tell a worker / register a watch / spawn a terminal). */
+	private dispatchOutbox(msg: OutboxMessage, liveNames: string[]): void {
+		if (msg.kind === 'tell') {
+			const name = resolveTellTarget(msg.target, liveNames);
+			const tile = name ? this.allSessions().find((t) => t.name === name) : undefined;
+			if (tile) tile.sendLine(msg.message);
+			else this.writeGodInbox(`could not deliver to "${msg.target}" — not a live terminal. Live: ${liveNames.join(', ') || '(none)'}`);
+		} else if (msg.kind === 'watch') {
+			const name = resolveTellTarget(msg.target, liveNames);
+			if (name) this.watchers.push({ target: name, note: msg.note });
+			else this.writeGodInbox(`cannot watch "${msg.target}" — not a live terminal. Live: ${liveNames.join(', ') || '(none)'}`);
+		} else {
+			void this.spawnFromKane(msg.repo, msg.base, msg.task);
 		}
 	}
 
@@ -544,6 +577,19 @@ export class TerminalsGrid {
 	}
 
 	private handleReady(t: TerminalTile): void {
+		// Fire any one-shot watch whose target just finished — idle and NOT stalled on a prompt.
+		if (this.watchers.some((w) => w.target === t.name)) {
+			const out = t.recentOutput();
+			if (!looksLikePrompt(out) && !looksLikeMenu(out)) {
+				const fired = this.watchers.filter((w) => w.target === t.name);
+				this.watchers = this.watchers.filter((w) => w.target !== t.name);
+				for (const w of fired) this.godConsole?.notify(`[watch] terminal "${t.name}" finished — you asked: ${w.note}`);
+			}
+		}
+		// Deliver a Kane-spawned terminal's initial task once it's first ready.
+		const task = this.pendingTask.get(t.tileId);
+		if (task !== undefined) { this.pendingTask.delete(t.tileId); t.sendLine(task); }
+
 		if (this.hidden.includes(t)) return; // a hidden, background session never steals the center
 		if (this.chatRoom) { this.chatRoom.noteIdle(t.name); return; } // chat owns idle while open
 		const r = rqReady(this.q, t.tileId);
