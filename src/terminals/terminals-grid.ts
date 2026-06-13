@@ -119,11 +119,11 @@ export class TerminalsGrid {
 			lockBtn.toggleClass('cos-lock-on', this.locked);
 		});
 
-		this.selectBtn = controls.createEl('button', { text: '⊕ Select' });
-		this.selectBtn.addEventListener('click', () => this.setSelecting(!this.selecting));
-
-		// Chat button intentionally not rendered (hidden). The group-chat code path remains
-		// available but has no toolbar entry point — Kane is the way to coordinate now.
+		// Select + Chat buttons intentionally not rendered — the group-chat feature is hidden,
+		// and Select only existed to pick chat members. The code paths (setSelecting / openChat /
+		// ChatRoom) remain intact, so uncommenting these two lines brings the chat workflow back.
+		// this.selectBtn = controls.createEl('button', { text: '⊕ Select' });
+		// this.selectBtn.addEventListener('click', () => this.setSelecting(!this.selecting));
 
 		this.godBtn = controls.createEl('button', { text: '🜲 Kane', cls: 'cos-god-btn' });
 		this.godBtn.setAttribute('title', 'Open the Kane overseer console — sees the whole floor, acts on request');
