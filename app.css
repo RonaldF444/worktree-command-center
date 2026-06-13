@@ -114,3 +114,16 @@ html, body {
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb { background: var(--background-modifier-border); border-radius: 6px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--background-modifier-border-hover); }
+
+/* Usage battery in the topbar (manual ⟳ refresh). */
+.wcc-usage { display: flex; align-items: center; gap: 8px; margin-left: auto; font-size: 12px; color: var(--text-muted); }
+.wcc-batt { position: relative; width: 46px; height: 16px; border: 1px solid var(--text-muted); border-radius: 3px; padding: 1px; box-sizing: border-box; }
+.wcc-batt::after { content: ''; position: absolute; right: -4px; top: 4px; width: 3px; height: 6px; background: var(--text-muted); border-radius: 0 2px 2px 0; }
+.wcc-batt-fill { height: 100%; width: 0%; border-radius: 2px; background: #2fae6e; transition: width .3s ease; }
+.wcc-batt-fill[data-level='warn'] { background: #e0a92e; }
+.wcc-batt-fill[data-level='crit'] { background: #d2453e; }
+.wcc-usage-session { color: var(--text-normal); }
+.wcc-usage-week { opacity: .8; }
+.wcc-usage-refresh { background: transparent; border: none; color: var(--text-muted); cursor: pointer; font-size: 15px; line-height: 1; padding: 2px 4px; }
+.wcc-usage-refresh:hover { color: var(--text-normal); }
+.wcc-usage-refresh:disabled { opacity: .5; cursor: default; }

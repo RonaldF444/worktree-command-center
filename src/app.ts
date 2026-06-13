@@ -3,6 +3,8 @@ import { toast } from './ui/toast';
 import { promptForTopic } from './ui/prompt-dialog';
 import { TerminalsGrid, type GridDeps, type RepoConfig } from './terminals/terminals-grid';
 import { discoverRepos, mergeRepos } from './workspace';
+import { UsageProbe } from './terminals/usage-probe';
+import { UsageWidget } from './ui/usage-widget';
 import * as path from 'path';
 
 declare global {
@@ -46,6 +48,14 @@ async function main(): Promise<void> {
 		topBar.createSpan({ cls: 'wcc-brand', text: '🌳 Worktree Command Center' });
 		const addFolderBtn = topBar.createEl('button', { cls: 'wcc-add', text: '➕ Add folder' });
 		const statusSpan = topBar.createSpan({ cls: 'wcc-status', text: `${repos.length} repos` });
+
+		// Usage battery (manual ⟳ refresh; scrapes /usage from a hidden, reused claude session).
+		const usageProbe = new UsageProbe({
+			sidecarPath: path.join(sidecarDir, 'sidecar.cjs'),
+			cwd: repos[0]?.path ?? userData,
+		});
+		new UsageWidget(usageProbe).render(topBar);
+		window.addEventListener('beforeunload', () => usageProbe.dispose());
 
 		// Grid container: grid.mount() builds into this div (app.css gives it a column flex so
 		// the terminal stage gets real height).
