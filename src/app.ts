@@ -5,6 +5,7 @@ import { TerminalsGrid, type GridDeps, type RepoConfig } from './terminals/termi
 import { discoverRepos, mergeRepos } from './workspace';
 import { UsageProbe } from './terminals/usage-probe';
 import { UsageWidget } from './ui/usage-widget';
+import { AttentionWidget } from './ui/attention-widget';
 import * as path from 'path';
 
 declare global {
@@ -43,6 +44,10 @@ async function main(): Promise<void> {
 
 		const appEl = document.getElementById('app')!;
 
+		// Construct the grid early so topbar widgets can reference it; mounted into the grid
+		// container further below.
+		const grid = new TerminalsGrid(deps);
+
 		// Top bar (styled via app.css). Sits above the grid and is never wiped by grid.mount().
 		const topBar = appEl.createDiv({ cls: 'wcc-topbar' });
 		topBar.createSpan({ cls: 'wcc-brand', text: '🌳 Worktree Command Center' });
@@ -57,11 +62,15 @@ async function main(): Promise<void> {
 		new UsageWidget(usageProbe).render(topBar);
 		window.addEventListener('beforeunload', () => usageProbe.dispose());
 
+		// Attention queue: which terminals need you (prompt / menu / errored / idle).
+		const attention = new AttentionWidget(() => grid.attentionItems(), (id) => grid.revealTile(id));
+		attention.render(topBar);
+		window.addEventListener('beforeunload', () => attention.dispose());
+
 		// Grid container: grid.mount() builds into this div (app.css gives it a column flex so
 		// the terminal stage gets real height).
 		const gridContainer = appEl.createDiv({ cls: 'wcc-grid-container' });
 
-		const grid = new TerminalsGrid(deps);
 		await grid.mount(gridContainer);
 
 		addFolderBtn.addEventListener('click', () => {

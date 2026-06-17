@@ -128,3 +128,20 @@ html, body {
 .wcc-usage-refresh { background: transparent; border: none; color: var(--text-muted); cursor: pointer; font-size: 15px; line-height: 1; padding: 2px 4px; }
 .wcc-usage-refresh:hover { color: var(--text-normal); }
 .wcc-usage-refresh:disabled { opacity: .5; cursor: default; }
+
+/* Attention queue badge + dropdown. */
+.wcc-attn { position: relative; }
+.wcc-attn-btn { background: transparent; border: 1px solid var(--background-modifier-border); color: var(--text-muted); cursor: pointer; font-size: 12px; border-radius: 6px; padding: 3px 9px; }
+.wcc-attn-btn:hover { color: var(--text-normal); }
+.wcc-attn-btn[data-level='warn'] { color: var(--color-yellow); border-color: var(--color-yellow); }
+.wcc-attn-btn[data-level='crit'] { color: #fff; background: #d2453e; border-color: #d2453e; }
+.wcc-attn-menu { position: absolute; right: 0; top: 28px; z-index: 1200; min-width: 240px; max-height: 60vh; overflow-y: auto; background: var(--background-secondary); border: 1px solid var(--background-modifier-border); border-radius: 8px; box-shadow: 0 8px 28px rgba(0,0,0,.45); padding: 6px; }
+.wcc-attn-group { font-size: 10px; text-transform: uppercase; letter-spacing: .5px; color: var(--text-faint); padding: 6px 8px 2px; }
+.wcc-attn-row { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 6px; cursor: pointer; font-size: 12px; }
+.wcc-attn-row:hover { background: var(--background-modifier-hover); }
+.wcc-attn-name { color: var(--text-normal); font-weight: 600; }
+.wcc-attn-repo { font-size: 11px; color: var(--text-muted); background: rgba(154,160,180,0.14); padding: 1px 7px; border-radius: 999px; white-space: nowrap; }
+.wcc-attn-state { margin-left: auto; font-size: 11px; color: var(--text-faint); }
+.wcc-attn-row.state-prompt .wcc-attn-state, .wcc-attn-row.state-menu .wcc-attn-state { color: var(--color-yellow); }
+.wcc-attn-row.state-errored .wcc-attn-state { color: #d2453e; }
+.wcc-attn-empty { padding: 10px 8px; color: var(--text-faint); font-size: 12px; }
