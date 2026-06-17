@@ -133,6 +133,16 @@ html, body {
 .wcc-usage-refresh { background: transparent; border: none; color: var(--text-muted); cursor: pointer; font-size: 15px; line-height: 1; padding: 2px 4px; }
 .wcc-usage-refresh:hover { color: var(--text-normal); }
 .wcc-usage-refresh:disabled { opacity: .5; cursor: default; }
+.wcc-batt { cursor: pointer; }
+.wcc-usage-auto { background: transparent; border: none; color: var(--text-muted); cursor: pointer; font-size: 13px; line-height: 1; padding: 2px 4px; opacity: .6; }
+.wcc-usage-auto:hover { color: var(--text-normal); opacity: 1; }
+.wcc-usage-auto.on { color: var(--color-cyan, #39c5cf); opacity: 1; }
+.wcc-usage { position: relative; }
+.wcc-usage-pop { position: absolute; right: 0; top: 26px; z-index: 1200; min-width: 240px; background: var(--background-secondary); border: 1px solid var(--background-modifier-border); border-radius: 8px; box-shadow: 0 8px 28px rgba(0,0,0,.45); padding: 8px; }
+.wcc-usage-poprow { display: flex; justify-content: space-between; gap: 12px; padding: 3px 4px; font-size: 12px; }
+.wcc-usage-poplabel { color: var(--text-muted); }
+.wcc-usage-popval { color: var(--text-normal); }
+.wcc-usage-popnote { margin-top: 4px; padding: 2px 4px; font-size: 10.5px; color: var(--text-faint); }
 
 /* Attention queue badge + dropdown. */
 .wcc-attn { position: relative; }

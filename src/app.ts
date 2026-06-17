@@ -59,8 +59,9 @@ async function main(): Promise<void> {
 			sidecarPath: path.join(sidecarDir, 'sidecar.cjs'),
 			cwd: repos[0]?.path ?? userData,
 		});
-		new UsageWidget(usageProbe).render(topBar);
-		window.addEventListener('beforeunload', () => usageProbe.dispose());
+		const usageWidget = new UsageWidget(usageProbe);
+		usageWidget.render(topBar);
+		window.addEventListener('beforeunload', () => { usageWidget.dispose(); usageProbe.dispose(); });
 
 		// Attention queue: which terminals need you (prompt / menu / errored / idle).
 		const attention = new AttentionWidget(() => grid.attentionItems(), (id) => grid.revealTile(id));

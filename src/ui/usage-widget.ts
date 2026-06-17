@@ -1,23 +1,48 @@
 import { UsageProbe } from '../terminals/usage-probe';
+import type { UsageReadout } from '../terminals/usage-parse';
 
-/** Topbar battery: session % + reset and weekly % + reset, refreshed only on ⟳. */
+const AUTO_MS = 60_000; // auto-refresh cadence when enabled
+
+/** Topbar usage battery: session % + reset and weekly % inline; ⟳ manual refresh; an auto-
+ *  refresh toggle; and a click-to-expand popover with session / week / credits detail. */
 export class UsageWidget {
+	private battEl: HTMLElement | null = null;
 	private battFill: HTMLElement | null = null;
 	private sessionLabel: HTMLElement | null = null;
 	private weekLabel: HTMLElement | null = null;
 	private refreshBtn: HTMLButtonElement | null = null;
+	private autoBtn: HTMLButtonElement | null = null;
+	private pop: HTMLElement | null = null;
 	private busy = false;
+	private auto = false;
+	private autoTimer: number | null = null;
+	private last: UsageReadout | null = null;
+	private onDocClick: ((e: MouseEvent) => void) | null = null;
 
 	constructor(private probe: UsageProbe) {}
 
 	render(parent: HTMLElement): void {
 		const el = parent.createDiv({ cls: 'wcc-usage' });
-		const batt = el.createDiv({ cls: 'wcc-batt', attr: { title: 'Current session (5-hour window). Approximate · this machine only.' } });
-		this.battFill = batt.createDiv({ cls: 'wcc-batt-fill' });
+		this.battEl = el.createDiv({ cls: 'wcc-batt', attr: { title: 'Current session (5-hour window). Click for detail. Approximate · this machine only.' } });
+		this.battFill = this.battEl.createDiv({ cls: 'wcc-batt-fill' });
+		this.battEl.addEventListener('click', (e) => { e.stopPropagation(); this.togglePop(); });
 		this.sessionLabel = el.createSpan({ cls: 'wcc-usage-session', text: 'tap ⟳ for usage' });
 		this.weekLabel = el.createSpan({ cls: 'wcc-usage-week', text: '' });
+		this.autoBtn = el.createEl('button', { cls: 'wcc-usage-auto', text: '⏱', attr: { title: 'Auto-refresh every 60s (off)' } });
+		this.autoBtn.addEventListener('click', (e) => { e.stopPropagation(); this.toggleAuto(); });
 		this.refreshBtn = el.createEl('button', { cls: 'wcc-usage-refresh', text: '⟳', attr: { title: 'Refresh usage' } });
-		this.refreshBtn.addEventListener('click', () => void this.refresh());
+		this.refreshBtn.addEventListener('click', (e) => { e.stopPropagation(); void this.refresh(); });
+		this.pop = el.createDiv({ cls: 'wcc-usage-pop' });
+		this.pop.style.display = 'none';
+		this.onDocClick = () => this.togglePop(false);
+		document.addEventListener('click', this.onDocClick);
+	}
+
+	private togglePop(force?: boolean): void {
+		if (!this.pop) return;
+		const open = force ?? this.pop.style.display === 'none';
+		this.pop.style.display = open ? 'block' : 'none';
+		if (open) this.renderPop();
 	}
 
 	private async refresh(): Promise<void> {
@@ -26,18 +51,8 @@ export class UsageWidget {
 		this.refreshBtn.textContent = '…';
 		this.refreshBtn.disabled = true;
 		try {
-			const r = await this.probe.refresh();
-			const pct = r.sessionPct ?? 0;
-			if (this.battFill) {
-				this.battFill.style.width = `${pct}%`;
-				this.battFill.dataset.level = pct <= 60 ? 'ok' : pct <= 85 ? 'warn' : 'crit';
-			}
-			this.sessionLabel!.textContent = r.sessionPct === null
-				? 'usage unavailable'
-				: `${r.sessionPct}%${r.sessionReset ? ` · resets ${r.sessionReset}` : ''}`;
-			this.weekLabel!.textContent = r.weekPct === null
-				? ''
-				: `Week ${r.weekPct}%${r.weekReset ? ` · ${r.weekReset}` : ''}`;
+			this.last = await this.probe.refresh();
+			this.apply(this.last);
 		} catch {
 			this.sessionLabel!.textContent = "couldn't read usage — try again";
 		} finally {
@@ -45,5 +60,47 @@ export class UsageWidget {
 			this.refreshBtn.textContent = '⟳';
 			this.refreshBtn.disabled = false;
 		}
+	}
+
+	private apply(r: UsageReadout): void {
+		const pct = r.sessionPct ?? 0;
+		if (this.battFill) {
+			this.battFill.style.width = `${pct}%`;
+			this.battFill.dataset.level = pct <= 60 ? 'ok' : pct <= 85 ? 'warn' : 'crit';
+		}
+		this.sessionLabel!.textContent = r.sessionPct === null
+			? 'usage unavailable'
+			: `${r.sessionPct}%${r.sessionReset ? ` · resets ${r.sessionReset}` : ''}`;
+		this.weekLabel!.textContent = r.weekPct === null ? '' : `Week ${r.weekPct}%`;
+		if (this.pop && this.pop.style.display !== 'none') this.renderPop();
+	}
+
+	private renderPop(): void {
+		if (!this.pop) return;
+		this.pop.empty();
+		const r = this.last;
+		if (!r) { this.pop.createDiv({ cls: 'wcc-usage-poprow', text: 'Tap ⟳ to load usage.' }); return; }
+		const row = (label: string, value: string) => {
+			const d = this.pop!.createDiv({ cls: 'wcc-usage-poprow' });
+			d.createSpan({ cls: 'wcc-usage-poplabel', text: label });
+			d.createSpan({ cls: 'wcc-usage-popval', text: value });
+		};
+		row('Session', r.sessionPct === null ? '—' : `${r.sessionPct}%${r.sessionReset ? ` · resets ${r.sessionReset}` : ''}`);
+		row('Week', r.weekPct === null ? '—' : `${r.weekPct}%${r.weekReset ? ` · resets ${r.weekReset}` : ''}`);
+		row('Credits', r.creditsPct === null ? '—' : `${r.creditsPct}%${r.creditsSpent ? ` · ${r.creditsSpent}` : ''}${r.creditsReset ? ` · resets ${r.creditsReset}` : ''}`);
+		this.pop.createDiv({ cls: 'wcc-usage-popnote', text: 'approx · this machine only' });
+	}
+
+	private toggleAuto(): void {
+		this.auto = !this.auto;
+		this.autoBtn?.toggleClass('on', this.auto);
+		this.autoBtn?.setAttribute('title', `Auto-refresh every 60s (${this.auto ? 'on' : 'off'})`);
+		if (this.autoTimer !== null) { window.clearInterval(this.autoTimer); this.autoTimer = null; }
+		if (this.auto) { void this.refresh(); this.autoTimer = window.setInterval(() => void this.refresh(), AUTO_MS); }
+	}
+
+	dispose(): void {
+		if (this.autoTimer !== null) { window.clearInterval(this.autoTimer); this.autoTimer = null; }
+		if (this.onDocClick) document.removeEventListener('click', this.onDocClick);
 	}
 }

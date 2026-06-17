@@ -5,6 +5,9 @@ export interface UsageReadout {
 	sessionReset: string | null; // e.g. "3:50am (America/New_York)"
 	weekPct: number | null;      // current week, all models
 	weekReset: string | null;    // e.g. "Jun 15, 12am (America/New_York)"
+	creditsPct: number | null;   // extra-usage credits balance
+	creditsSpent: string | null; // e.g. "$13.88 / $15.00"
+	creditsReset: string | null; // e.g. "Jul 1 (America/New_York)"
 }
 
 /** Strip ANSI/OSC escape sequences so word/number anchors survive. Box-drawing glyphs
@@ -36,14 +39,23 @@ function resetIn(s: string): string | null {
 	return m2 ? m2[1].replace(/\s+/g, ' ').trim() : null;
 }
 
+function spentIn(s: string): string | null {
+	const m = /\$[\d.,]+\s*\/\s*\$[\d.,]+/.exec(s);
+	return m ? m[0].replace(/\s+/g, ' ').trim() : null;
+}
+
 export function parseUsage(text: string): UsageReadout {
 	const t = stripAnsi(text);
 	const sess = sectionAfter(t, /current\s*session/i);
 	const week = sectionAfter(t, /current\s*week\s*\(?\s*all\s*models\)?/i);
+	const credits = sectionAfter(t, /usage\s*credits/i);
 	return {
 		sessionPct: pctIn(sess),
 		sessionReset: resetIn(sess),
 		weekPct: pctIn(week),
 		weekReset: resetIn(week),
+		creditsPct: pctIn(credits),
+		creditsSpent: spentIn(credits),
+		creditsReset: resetIn(credits),
 	};
 }
