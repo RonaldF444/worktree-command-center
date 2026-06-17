@@ -202,8 +202,12 @@ export class TerminalsGrid {
 		this.chatRoom = null;
 		this.stopFloorFeed();
 		this.board?.unmount();
+		// Drop the controls bar too, so re-mounting this grid (workspace switch) doesn't stack a
+		// second one. The stage wrap is detached-but-retained (tiles + sidecars stay alive).
+		this.controlsEl?.remove();
+		this.controlsEl = null;
 		// GOD survives a tab switch (like the tiles): detach with the stage wrap, keep the session.
-		this.stageWrapEl?.remove(); // detached but retained in memory (tiles + sidecars stay alive)
+		this.stageWrapEl?.remove();
 	}
 
 	private onResize = (): void => this.applyLayout();
@@ -389,6 +393,9 @@ export class TerminalsGrid {
 
 	/** Every live session GOD should see / be able to message (foreground + hidden background). */
 	private allSessions(): TerminalTile[] { return [...this.tiles, ...this.hidden]; }
+
+	/** Number of live terminals (foreground + hidden) — for the close-workspace confirm. */
+	terminalCount(): number { return this.tiles.length + this.hidden.length; }
 
 	/** Snapshot of which terminals need attention, for the topbar queue. */
 	attentionItems(): AttentionItem[] {
