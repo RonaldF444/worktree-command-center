@@ -21,3 +21,16 @@ export function looksLikeMenu(output: string): boolean {
 	if (/\benter\b[^\n]{0,15}\b(?:select|toggle|confirm)\b/i.test(t)) return true;
 	return false;
 }
+
+/** Best-effort sniff for a terminal that looks like it errored / failed. Fuzzy on purpose —
+ *  it only nudges the attention queue, never blocks. */
+export function looksErrored(output: string): boolean {
+	const t = String(output);
+	if (!t.trim()) return false;
+	if (/\b(error|exception|fatal|failed|failure)\b/i.test(t)) return true;
+	if (/traceback \(most recent call last\)/i.test(t)) return true;
+	if (/\bcommand not found\b|is not recognized as/i.test(t)) return true;
+	if (/\bexit(?:ed)?\b[^\n]{0,16}\bcode\s*[1-9]/i.test(t)) return true;
+	if (/✗/.test(t)) return true;
+	return false;
+}
