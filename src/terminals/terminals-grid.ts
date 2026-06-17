@@ -52,6 +52,7 @@ export class TerminalsGrid {
 	private maximized = false;
 	private locked = false;
 	private lockedTileId: number | null = null; // individual lock: this tile is pinned to center until you navigate away
+	private searchQuery = '';
 	private selecting = false;
 	private selectBtn: HTMLButtonElement | null = null;
 	private chatBtn: HTMLButtonElement | null = null;
@@ -138,6 +139,9 @@ export class TerminalsGrid {
 
 		const refreshBtn = controls.createEl('button', { text: '⟳ Refresh' });
 		refreshBtn.addEventListener('click', () => { void this.scanWorktrees().then(() => this.board?.refresh()); });
+
+		const search = controls.createEl('input', { cls: 'cos-search', attr: { type: 'text', placeholder: '🔍 filter terminals…', title: 'Dim terminals whose name / repo / branch don\'t match' } });
+		search.addEventListener('input', () => { this.searchQuery = search.value.trim().toLowerCase(); this.refreshSearch(); });
 
 		if (!this.board) this.board = new BoardView(
 			this.coordDir,
@@ -553,6 +557,15 @@ export class TerminalsGrid {
 		this.tiles.forEach((t) => t.setLocked(t.tileId === this.lockedTileId));
 	}
 
+	/** Dim tiles whose name / repo / branch don't match the filter box (empty = all lit). */
+	private refreshSearch(): void {
+		const q = this.searchQuery;
+		for (const t of this.tiles) {
+			const hay = `${t.name} ${t.repoName} ${t.branch}`.toLowerCase();
+			t.setDimmed(q !== '' && !hay.includes(q));
+		}
+	}
+
 	/** Focus the centered tile and blur every other one, so a stray keystroke can never
 	 *  land on a stale terminal (the root cause of "I typed but the previous one got it"). */
 	private focusCentered(): void {
@@ -588,6 +601,7 @@ export class TerminalsGrid {
 			this.chatTile.setCentered(chatId === centerId);
 		}
 		if (this.stageEl.classList.contains('alt-on')) this.refreshBadges();
+		if (this.searchQuery) this.refreshSearch(); // keep newly-laid-out tiles consistent with the filter
 	}
 
 	private setMaximized(on: boolean): void {

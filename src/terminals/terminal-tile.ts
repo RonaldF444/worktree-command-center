@@ -196,6 +196,11 @@ export class TerminalTile {
 		this.lockBtnEl?.toggleClass('on', on);
 	}
 
+	/** Dim this tile when it doesn't match the search filter. */
+	setDimmed(on: boolean): void {
+		this.el?.toggleClass('cos-term-dim', on);
+	}
+
 	/** Detach/re-attach the tile from the visible stage WITHOUT touching the session.
 	 *  Hidden tiles keep their claude process + xterm buffer alive in the background. */
 	setHidden(on: boolean): void {

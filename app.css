@@ -104,6 +104,9 @@ html, body {
 .cos-reopen-btn { margin-left: auto; padding: 2px 9px !important; font-size: 11px !important; }
 .cos-coord-hidden { display: flex; flex-direction: column; gap: 3px; margin-bottom: 8px; }
 .cos-term-hide { font-size: 15px !important; line-height: 1; }
+/* Filter box + dimmed (non-matching) tiles. */
+.cos-search { padding: 5px 9px; border-radius: 6px; border: 1px solid var(--background-modifier-border); background: var(--background-primary); color: var(--text-normal); font-size: 12px; min-width: 150px; }
+.cos-terminals-stage .cos-term-tile.cos-term-dim { opacity: 0.28; filter: grayscale(0.6); transition: opacity .2s ease; }
 /* Right-clustered tile controls: lock · minimize · close. */
 .cos-term-head-btns { display: flex; align-items: center; gap: 4px; margin-left: auto; }
 .cos-term-lock { font-size: 11px !important; line-height: 1; opacity: 0.55; filter: grayscale(1); }
