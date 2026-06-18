@@ -44,6 +44,7 @@ export class TerminalTile {
 	private lockBtnEl: HTMLButtonElement | null = null;
 	private remoteBtnEl: HTMLButtonElement | null = null;
 	private remoteOn = false;
+	private centered = false;
 	private readyWatcher: fs.FSWatcher | null = null;
 	private nameEl: HTMLElement | null = null;
 	private displayName: string;
@@ -122,11 +123,12 @@ export class TerminalTile {
 			}
 		});
 		this.fitThrottle = new FitThrottle({
-			// Propose without mutating (so the dedupe holds), then size BOTH xterm + PTY together.
-			// Clamp to a readable minimum: a tiny satellite tile must NOT make claude wrap output
-			// to ~30 cols — keep it ≥80 so a later centered view reads correctly (small tiles just
-			// show a clipped preview).
-			propose: () => this.fit?.proposeDimensions() ?? null,
+			// Only resize the PTY when this tile is CENTERED. Resizing on every bubble/center makes
+			// ConPTY re-emit the screen (xterm appends it → the same message duplicated N times).
+			// So satellites/uncentered tiles keep their size (no resize, no re-emit); the centered
+			// tile fits once (deduped), re-fitting only if the centered size truly changes (window
+			// resize / satellite count). Clamp to ≥80 cols so output is never wrapped tiny.
+			propose: () => (this.centered ? this.fit?.proposeDimensions() ?? null : null),
 			apply: (cols, rows) => { this.term?.resize(cols, rows); this.bridge?.resize(cols, rows); },
 			minCols: 80,
 			minRows: 20,
@@ -191,7 +193,9 @@ export class TerminalTile {
 	}
 
 	setCentered(on: boolean): void {
+		this.centered = on;
 		this.el?.toggleClass('centered', on);
+		if (on) this.fitSoon(); // fit the PTY to the centered size (after the size animation settles)
 	}
 
 	/** Reflect this tile's individual-lock state (gold ring + lit lock button). */
