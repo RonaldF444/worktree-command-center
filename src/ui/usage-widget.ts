@@ -63,15 +63,17 @@ export class UsageWidget {
 	}
 
 	private apply(r: UsageReadout): void {
-		const pct = r.sessionPct ?? 0;
+		// Battery = REMAINING (full when unused, drains as you use), like a real battery.
+		const left = r.sessionPct === null ? null : Math.max(0, 100 - r.sessionPct);
 		if (this.battFill) {
-			this.battFill.style.width = `${pct}%`;
-			this.battFill.dataset.level = pct <= 60 ? 'ok' : pct <= 85 ? 'warn' : 'crit';
+			this.battFill.style.width = `${left ?? 0}%`;
+			// low battery → red.
+			this.battFill.dataset.level = left === null ? '' : left >= 50 ? 'ok' : left >= 20 ? 'warn' : 'crit';
 		}
-		this.sessionLabel!.textContent = r.sessionPct === null
+		this.sessionLabel!.textContent = left === null
 			? 'usage unavailable'
-			: `${r.sessionPct}%${r.sessionReset ? ` · resets ${r.sessionReset}` : ''}`;
-		this.weekLabel!.textContent = r.weekPct === null ? '' : `Week ${r.weekPct}%`;
+			: `${left}% left${r.sessionReset ? ` · resets ${r.sessionReset}` : ''}`;
+		this.weekLabel!.textContent = r.weekPct === null ? '' : `Week ${Math.max(0, 100 - r.weekPct)}% left`;
 		if (this.pop && this.pop.style.display !== 'none') this.renderPop();
 	}
 
@@ -85,9 +87,10 @@ export class UsageWidget {
 			d.createSpan({ cls: 'wcc-usage-poplabel', text: label });
 			d.createSpan({ cls: 'wcc-usage-popval', text: value });
 		};
-		row('Session', r.sessionPct === null ? '—' : `${r.sessionPct}%${r.sessionReset ? ` · resets ${r.sessionReset}` : ''}`);
-		row('Week', r.weekPct === null ? '—' : `${r.weekPct}%${r.weekReset ? ` · resets ${r.weekReset}` : ''}`);
-		row('Credits', r.creditsPct === null ? '—' : `${r.creditsPct}%${r.creditsSpent ? ` · ${r.creditsSpent}` : ''}${r.creditsReset ? ` · resets ${r.creditsReset}` : ''}`);
+		const leftOf = (p: number | null) => (p === null ? '—' : `${Math.max(0, 100 - p)}% left`);
+		row('Session', r.sessionPct === null ? '—' : `${leftOf(r.sessionPct)}${r.sessionReset ? ` · resets ${r.sessionReset}` : ''}`);
+		row('Week', r.weekPct === null ? '—' : `${leftOf(r.weekPct)}${r.weekReset ? ` · resets ${r.weekReset}` : ''}`);
+		row('Credits', r.creditsSpent ? `${r.creditsSpent}${r.creditsReset ? ` · resets ${r.creditsReset}` : ''}` : (r.creditsPct === null ? '—' : `${r.creditsPct}% used`));
 		this.pop.createDiv({ cls: 'wcc-usage-popnote', text: 'approx · this machine only' });
 	}
 

@@ -37,7 +37,11 @@ export class UsageProbe {
 		const b = this.bridge;
 		if (!b) throw new Error('usage probe: session unavailable');
 		this.buf = '';
-		b.write('/usage\r');
+		// Submit like TerminalTile.sendLine: text first, then a SEPARATED Enter on a later tick.
+		// Bundling "/usage\r" into one write makes the sidecar/ConPTY coalesce it so the \r lands
+		// as a pasted newline that never submits — which is why the battery read 0 (it never ran).
+		b.write('/usage');
+		window.setTimeout(() => this.bridge?.write('\r'), 60);
 		const readout = await new Promise<UsageReadout>((resolve) => {
 			const started = Date.now();
 			const iv = window.setInterval(() => {
