@@ -1,7 +1,11 @@
 import { app, BrowserWindow, ipcMain, dialog } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
+import * as os from 'os';
+import { startRemoteServer } from './remote-server';
+import { pickHosts, accessUrls } from './remote-net';
 
+const REMOTE_PORT = 7420;
 let win: BrowserWindow | null = null;
 
 function createWindow(): void {
@@ -58,6 +62,14 @@ function createWindow(): void {
 		const r = await dialog.showOpenDialog(win!, { properties: ['openDirectory'] });
 		return r.canceled ? null : r.filePaths[0];
 	});
+
+	// Phone floor view: HTTP server (Tailscale-reachable) + the access info for the topbar panel.
+	const { token } = startRemoteServer({ port: REMOTE_PORT, getWindow: () => win });
+	ipcMain.handle('remote:info', () => ({
+		token,
+		port: REMOTE_PORT,
+		urls: accessUrls(pickHosts(os.networkInterfaces(), os.hostname()), REMOTE_PORT, token),
+	}));
 }
 
 app.whenReady().then(createWindow);

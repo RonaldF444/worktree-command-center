@@ -9,4 +9,8 @@ import { ipcRenderer } from 'electron';
 	getConfig: () => ipcRenderer.invoke('config:get'),
 	setConfig: (c: unknown) => ipcRenderer.invoke('config:set', c),
 	addFolder: () => ipcRenderer.invoke('addFolder'),
+	// Phone floor view bridge.
+	pushFloorState: (s: unknown) => ipcRenderer.send('remote:state', s),
+	onRemoteAction: (cb: (a: unknown) => void) => ipcRenderer.on('remote:action', (_e, a) => cb(a)),
+	remoteInfo: () => ipcRenderer.invoke('remote:info'),
 };

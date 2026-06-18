@@ -17,6 +17,9 @@ declare global {
 			getConfig(): Promise<any>;
 			setConfig(c: any): Promise<boolean>;
 			addFolder(): Promise<string | null>;
+			pushFloorState(s: unknown): void;
+			onRemoteAction(cb: (a: { type: string; id?: number; repo?: string; base?: string | null; task?: string }) => void): void;
+			remoteInfo(): Promise<{ token: string; port: number; urls: string[] }>;
 		};
 	}
 }
