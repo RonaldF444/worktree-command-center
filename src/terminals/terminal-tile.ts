@@ -9,6 +9,7 @@ import { scrollIntentForKey, type ScrollIntent } from './scroll-keys';
 import { FitThrottle } from './fit-throttle';
 import { ctrlClickActivator, openExternalUrl } from './links';
 import { promptForConfirm } from '../ui/prompt-dialog';
+import type { StageTile } from './stage-tile';
 
 export interface TerminalTileOpts {
 	tileId: number;
@@ -34,7 +35,7 @@ export interface TerminalTileOpts {
 }
 
 /** One embedded claude terminal (xterm) bound to a sidecar session + worktree. */
-export class TerminalTile {
+export class TerminalTile implements StageTile {
 	private term: Terminal | null = null;
 	private fit: FitAddon | null = null;
 	private bridge: SessionBridge | null = null;
@@ -52,6 +53,7 @@ export class TerminalTile {
 	private pasting = false;
 	private selected = false;
 	private idle = false; // false = busy/starting; true once the session goes ready (refresh confirms only when busy)
+	readonly isJournal = false;
 
 	constructor(private opts: TerminalTileOpts) {
 		this.displayName = opts.name ?? `${opts.repoName} · ${opts.worktree.branch}`;
