@@ -469,7 +469,7 @@ export class TerminalsGrid {
 
 	/** Snapshot of which terminals need attention, for the topbar queue. */
 	attentionItems(): AttentionItem[] {
-		return classifyAttention(this.allSessions().map((t) => ({
+		return classifyAttention((this.allSessions().filter((t) => !t.isJournal) as TerminalTile[]).map((t) => ({
 			id: t.tileId, name: t.name, repo: this.repoNameFor(t),
 			output: t.recentOutput(), idle: this.idleTiles.has(t.tileId),
 		})));
