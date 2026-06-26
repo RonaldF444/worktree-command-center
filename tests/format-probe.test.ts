@@ -2,10 +2,11 @@ import { describe, it, expect } from 'vitest';
 import { buildFormatPrompt, parseFormatOutput } from '../src/terminals/format-probe';
 
 describe('buildFormatPrompt', () => {
-  it('includes the strict instruction and the verbatim note', () => {
-    const p = buildFormatPrompt('- a\n  - b');
+  it('references the note file path and keeps the strict instruction', () => {
+    const p = buildFormatPrompt('/tmp/cos-format-1.md');
     expect(p).toContain('Preserve every word');
-    expect(p).toContain('- a\n  - b');
+    expect(p).toContain('/tmp/cos-format-1.md');
+    expect(p).toContain('Read the note file at');
   });
 });
 
