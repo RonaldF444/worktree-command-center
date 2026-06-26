@@ -208,3 +208,13 @@ html, body {
 .cos-journal-hist-time { color: var(--text-faint); font-size: 11px; margin-left: auto; }
 .cos-journal-hist-empty { color: var(--text-faint); padding: 10px; font-size: 12px; }
 .cos-journal-back { margin-top: 8px; font-size: 11px; padding: 3px 10px; border-radius: 6px; border: 1px solid var(--background-modifier-border); background: var(--background-primary); color: var(--text-normal); cursor: pointer; }
+
+/* Journal Format: side-by-side preview + loading state. */
+.cos-journal-formatting { flex: 1 1 auto; display: flex; align-items: center; justify-content: center; color: var(--text-muted); font-size: 12px; }
+.cos-journal-preview { flex: 1 1 auto; min-height: 0; display: flex; gap: 6px; }
+.cos-journal-pane { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; }
+.cos-journal-pane-h { flex: 0 0 auto; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-faint); padding: 2px 4px; }
+.cos-journal-preview .cos-journal-text { flex: 1 1 auto; }
+.cos-journal-preview-actions { flex: 0 0 auto; display: flex; gap: 6px; padding: 6px 8px; background: var(--background-secondary); border-top: 1px solid var(--background-modifier-border); }
+.cos-journal-preview-actions button { font-size: 11px; padding: 3px 12px; border-radius: 6px; border: 1px solid var(--background-modifier-border); background: var(--background-primary); color: var(--text-normal); cursor: pointer; }
+.cos-journal-preview-actions button:hover { border-color: var(--interactive-accent); }
