@@ -82,3 +82,16 @@ export function keyToIndex(key: string): number | null {
 	if (/^[A-Z]$/.test(key)) return 12 + (key.charCodeAt(0) - 65);
 	return null;
 }
+
+/** Alt+←/→ spotlight cycle across every tile PLUS an "equal grid" stop (null). Given the
+ *  current center (or null = equal grid) and a direction, return the next position in the ring
+ *  [id0, id1, …, idN, null]. Unlike the ready-queue cycle this is independent of which tiles
+ *  are idle, so it can always reach the equal grid — including when every terminal is thinking
+ *  (the case where the ready stack is empty and the old cycle had nothing to move). */
+export function nextSpotlight(ids: number[], current: number | null, dir: 1 | -1): number | null {
+	const ring: Array<number | null> = [...ids, null];
+	const i = ring.indexOf(current);
+	const cur = i === -1 ? ring.length - 1 : i; // unknown current → treat as the grid slot
+	const next = (cur + dir + ring.length) % ring.length;
+	return ring[next]!;
+}
