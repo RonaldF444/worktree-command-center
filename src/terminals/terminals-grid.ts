@@ -10,13 +10,13 @@ import { BoardView } from './board-view';
 import { promptForConfirm } from '../ui/prompt-dialog';
 import { ChatRoom } from './chat-room';
 import { ChatTile } from './chat-tile';
-import { settledLayout, centeredLayout, keyForIndex, keyToIndex } from './bubble-layout';
-import { emptyState, applyKeystroke, onReady as rqReady, onSubmit as rqSubmit, onClose as rqClose, onClick as rqClick, cycleNext as rqCycleNext, cyclePrev as rqCyclePrev } from './ready-queue';
+import { settledLayout, centeredLayout, keyForIndex, keyToIndex, nextSpotlight } from './bubble-layout';
+import { emptyState, applyKeystroke, onReady as rqReady, onSubmit as rqSubmit, onClose as rqClose, onClick as rqClick } from './ready-queue';
 import { decideCenter, type SpotlightState } from './focus-decider';
 import { partitionByHidden } from './session-partition';
 import { GodConsole } from './god-console';
 import { slug as godSlug, formatFloorSnapshot, formatFloorIndex, parseOutboxMessage, resolveTellTarget, type OutboxMessage } from './god';
-import { looksLikeMenu, looksErrored } from './prompt-detect';
+import { looksLikeMenu, looksErrored, looksBusy } from './prompt-detect';
 import { looksLikePrompt } from './chat-room';
 import { classifyAttention, type AttentionItem } from './attention';
 import { JournalTile } from './journal-tile';
@@ -96,6 +96,7 @@ export class TerminalsGrid {
 	private idleTiles = new Set<number>();
 	private stageWrapEl: HTMLElement | null = null;
 	private floorTimer: number | null = null;
+	private spotlightTimer: number | null = null;
 	private godOutboxWatcher: import('fs').FSWatcher | null = null;
 	private parentEl: HTMLElement | null = null;
 	private readonly sidecarPath: string;
@@ -232,6 +233,7 @@ export class TerminalsGrid {
 	unmount(): void {
 		if (this.keydown) document.removeEventListener('keydown', this.keydown, true);
 		if (this.keyup) document.removeEventListener('keyup', this.keyup, true);
+		if (this.spotlightTimer !== null) { window.clearInterval(this.spotlightTimer); this.spotlightTimer = null; }
 		if (this.onWinFocus) window.removeEventListener('focus', this.onWinFocus);
 		if (this.onWinBlur) window.removeEventListener('blur', this.onWinBlur);
 		window.removeEventListener('resize', this.onResize);
@@ -266,6 +268,20 @@ export class TerminalsGrid {
 		this.layoutRaf = window.requestAnimationFrame(() => { this.layoutRaf = null; this.applyLayout(); });
 	}
 
+	/** Alt+←/→: step the spotlight across every visible tile AND an equal-grid stop (no
+	 *  spotlight). Independent of the ready stack, so it reaches the equal grid even when every
+	 *  terminal is thinking (the stack is empty then, which is why the old cycle couldn't).
+	 *  Landing on a tile pins it so the auto-decider won't immediately yank it back. */
+	private cycleSpotlight(dir: 1 | -1): void {
+		const chatId = this.chatTile?.tileId;
+		const ids = [...this.tiles.map((t) => t.tileId), ...(chatId !== undefined ? [chatId] : [])];
+		if (ids.length === 0) return;
+		const want = nextSpotlight(ids, this.centeredId, dir);
+		if (want === null) { this.centeredId = null; this.applyLayout(); return; } // equal grid
+		const r = rqClick(this.q, want); this.q = r.state; // pin so autoCenter keeps it
+		this.doCenter(want);
+	}
+
 	private installKeyboard(): void {
 		this.keydown = (e: KeyboardEvent) => {
 			if (e.key === 'Alt') { this.stageEl?.toggleClass('alt-on', true); this.refreshBadges(); return; }
@@ -273,8 +289,8 @@ export class TerminalsGrid {
 			// terminal so Claude gets it (double-Esc clears the message). Use the Minimize /
 			// Restore buttons to leave fullscreen.
 			if (!e.altKey) return;
-			if (e.key === 'ArrowRight') { e.preventDefault(); const r = rqCycleNext(this.q); this.q = r.state; if (r.center !== null) this.doCenter(r.center); return; }
-			if (e.key === 'ArrowLeft') { e.preventDefault(); const r = rqCyclePrev(this.q); this.q = r.state; if (r.center !== null) this.doCenter(r.center); return; }
+			if (e.key === 'ArrowRight') { e.preventDefault(); this.cycleSpotlight(1); return; }
+			if (e.key === 'ArrowLeft') { e.preventDefault(); this.cycleSpotlight(-1); return; }
 			if (e.key === 'l' || e.key === 'L') { e.preventDefault(); if (this.centeredId !== null) this.toggleLockById(this.centeredId); return; }
 			const norm = e.key.length === 1 ? e.key.toUpperCase() : e.key;
 			const idx = keyToIndex(norm);
@@ -283,6 +299,11 @@ export class TerminalsGrid {
 		this.keyup = (e: KeyboardEvent) => { if (e.key === 'Alt') { this.stageEl?.toggleClass('alt-on', false); this.tiles.forEach((t) => t.setBadge(null)); } };
 		document.addEventListener('keydown', this.keydown, true);
 		document.addEventListener('keyup', this.keyup, true);
+		// Re-derive the spotlight from live output ~1x/s so the layout stays honest when a tile
+		// resumes work by a route that isn't an in-app Enter (a cos-coord tell, an auto-sent task,
+		// bypass-permission auto-continue) — otherwise its idle flag drifts stale and the grid
+		// never drops to equal size even though every tile is thinking.
+		if (this.spotlightTimer === null) this.spotlightTimer = window.setInterval(() => this.autoCenter(), 1000);
 		// When the OS window regains focus (alt-tab back in), put the cursor back into the
 		// centered terminal — Electron otherwise restores it to whatever tile had it before.
 		this.onWinFocus = () => this.focusCentered();
@@ -806,7 +827,10 @@ export class TerminalsGrid {
 		const o = t.recentOutput();
 		if (looksLikePrompt(o)) return 'prompt';
 		if (looksLikeMenu(o)) return 'menu';
-		const idle = this.idleTiles.has(t.tileId);
+		// A tile that's actively working ("esc to interrupt" showing) is thinking, even if its
+		// idle flag drifted stale — a cos-coord tell / auto-continue starts a turn without the
+		// in-app Enter that would otherwise mark it busy.
+		const idle = this.idleTiles.has(t.tileId) && !looksBusy(o);
 		if (idle && looksErrored(o)) return 'errored';
 		return idle ? 'idle' : 'thinking';
 	}

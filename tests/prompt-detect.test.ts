@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { looksLikeMenu, looksErrored } from '../src/terminals/prompt-detect';
+import { looksLikeMenu, looksErrored, looksBusy } from '../src/terminals/prompt-detect';
 
 describe('looksLikeMenu', () => {
   // The real footer Claude Code renders under a single- or multi-select menu.
@@ -36,5 +36,18 @@ describe('looksErrored', () => {
     expect(looksErrored('Done. Results saved to run.log')).toBe(false);
     expect(looksErrored('Running the build now…')).toBe(false);
     expect(looksErrored('')).toBe(false);
+  });
+});
+
+describe('looksBusy', () => {
+  it('fires while a turn is running (the "esc to interrupt" hint)', () => {
+    expect(looksBusy('✻ Baking… (12s · esc to interrupt)')).toBe(true);
+    expect(looksBusy('⏵⏵ bypass permissions on · esc to interrupt · ← for agents')).toBe(true);
+    expect(looksBusy('ESC TO INTERRUPT')).toBe(true);
+  });
+  it('does NOT fire on an idle prompt bar or normal output', () => {
+    expect(looksBusy('⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents')).toBe(false);
+    expect(looksBusy('Done. Anything else?')).toBe(false);
+    expect(looksBusy('')).toBe(false);
   });
 });

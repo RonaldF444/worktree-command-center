@@ -34,3 +34,12 @@ export function looksErrored(output: string): boolean {
 	if (/✗/.test(t)) return true;
 	return false;
 }
+
+/** Is a turn actively RUNNING? Claude Code shows "esc to interrupt" in the status bar only
+ *  while a turn is in flight — regardless of how it started (an in-app Enter, a cos-coord tell,
+ *  or bypass-permission auto-continue). Used to keep the spotlight honest: a tile that's
+ *  actively working is `thinking`, so when every tile is working the grid drops to equal size
+ *  even if the per-tile idle flag drifted stale. */
+export function looksBusy(output: string): boolean {
+	return /esc\s+to\s+interrupt/i.test(String(output));
+}

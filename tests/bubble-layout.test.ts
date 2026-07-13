@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { settledLayout, centeredLayout, keyForIndex, keyToIndex } from '../src/terminals/bubble-layout';
+import { settledLayout, centeredLayout, keyForIndex, keyToIndex, nextSpotlight } from '../src/terminals/bubble-layout';
 
 describe('settledLayout', () => {
 	it('lays N tiles in an adaptive grid, all within bounds', () => {
@@ -66,5 +66,34 @@ describe('keyForIndex / keyToIndex', () => {
 		for (let i = 0; i < 16; i++) expect(keyToIndex(keyForIndex(i))).toBe(i);
 		expect(keyToIndex('F13')).toBeNull();
 		expect(keyToIndex('1')).toBeNull();
+	});
+});
+
+describe('nextSpotlight (Alt+←/→ cycle incl. equal-grid stop)', () => {
+	const ids = [1, 2, 3, 4];
+	it('forward: grid → first tile → … → last → back to grid', () => {
+		expect(nextSpotlight(ids, null, 1)).toBe(1);
+		expect(nextSpotlight(ids, 1, 1)).toBe(2);
+		expect(nextSpotlight(ids, 3, 1)).toBe(4);
+		expect(nextSpotlight(ids, 4, 1)).toBeNull(); // past the last tile → equal grid
+	});
+	it('backward is the reverse', () => {
+		expect(nextSpotlight(ids, null, -1)).toBe(4);
+		expect(nextSpotlight(ids, 4, -1)).toBe(3);
+		expect(nextSpotlight(ids, 1, -1)).toBeNull(); // before the first → equal grid
+	});
+	it('REGRESSION: the equal grid is always reachable by cycling (the reported bug)', () => {
+		let cur: number | null = 2;
+		const seen: Array<number | null> = [];
+		for (let i = 0; i < ids.length + 1; i++) { cur = nextSpotlight(ids, cur, 1); seen.push(cur); }
+		expect(seen).toContain(null); // Alt+→ can reach the all-equal layout
+	});
+	it('an unknown current steps into the ring', () => {
+		expect(nextSpotlight(ids, 999, 1)).toBe(1);
+		expect(nextSpotlight(ids, 999, -1)).toBe(4);
+	});
+	it('no tiles → only the equal grid', () => {
+		expect(nextSpotlight([], null, 1)).toBeNull();
+		expect(nextSpotlight([], 5, 1)).toBeNull();
 	});
 });
