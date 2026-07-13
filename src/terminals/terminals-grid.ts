@@ -42,7 +42,16 @@ export interface GridDeps {
 	toast: (msg: string) => void;
 	promptForTopic: (title: string, placeholder: string, initial?: string, okLabel?: string) => Promise<string | null>;
 }
-interface SessionRecord { worktreePath: string; branch: string; repoName: string; repoPath: string; baseBranch: string; name?: string; hidden?: boolean; kind?: 'terminal' | 'journal'; journalSlug?: string; }
+interface SessionRecord { worktreePath: string; branch: string; repoName: string; repoPath: string; baseBranch: string; name?: string; hidden?: boolean; kind?: 'terminal' | 'journal'; journalSlug?: string; model?: string; }
+
+// Model options for the spawn toolbar dropdown. Empty value = inherit the claude CLI default.
+const SPAWN_MODELS: { label: string; value: string }[] = [
+	{ label: 'Model: Default', value: '' },
+	{ label: 'Opus 4.8', value: 'claude-opus-4-8' },
+	{ label: 'Sonnet 5', value: 'claude-sonnet-5' },
+	{ label: 'Fable 5', value: 'claude-fable-5' },
+	{ label: 'Haiku 4.5', value: 'claude-haiku-4-5-20251001' },
+];
 
 // --- Kane personality mode (toggled by his /personality command) ---
 const KANE_PERSONA_ON =
@@ -62,6 +71,7 @@ export class TerminalsGrid {
 	private repos: RepoConfig[] = [];
 	private repoSel: HTMLSelectElement | null = null;
 	private branchSel: HTMLSelectElement | null = null;
+	private modelSel: HTMLSelectElement | null = null;
 	private stageEl: HTMLElement | null = null;
 	private maxBtn: HTMLElement | null = null;
 	private controlsEl: HTMLElement | null = null;
@@ -138,6 +148,10 @@ export class TerminalsGrid {
 		this.repoSel.addEventListener('change', () => void this.refreshBranches());
 
 		this.branchSel = controls.createEl('select');
+
+		this.modelSel = controls.createEl('select');
+		this.modelSel.title = 'Model for new terminals';
+		for (const m of SPAWN_MODELS) this.modelSel.createEl('option', { text: m.label, value: m.value });
 
 		const newBranchBtn = controls.createEl('button', { text: '+ New branch' });
 		newBranchBtn.addEventListener('click', () => {
@@ -332,18 +346,18 @@ export class TerminalsGrid {
 		const repo = this.selectedRepo();
 		const base = this.branchSel?.value;
 		if (!repo || !base) { this.deps.toast('Pick a repo and branch first'); return; }
-		await this.spawnWorktree(repo, base, {});
+		await this.spawnWorktree(repo, base, { model: this.modelSel?.value || undefined });
 	}
 
 	/** Shared spawn core: create a worktree + tile, render, persist, layout. Optionally queue an
 	 *  initial task to send once the new session is first ready. Returns the tile (or null). */
-	private async spawnWorktree(repo: RepoConfig, base: string, opts: { task?: string }): Promise<TerminalTile | null> {
+	private async spawnWorktree(repo: RepoConfig, base: string, opts: { task?: string; model?: string }): Promise<TerminalTile | null> {
 		try {
 			const branches = await listBranches(repo.path);
 			const branch = this.pendingNewBranch ?? nextWorktreeBranch(branches, base);
 			this.pendingNewBranch = null;
 			const worktree = await createWorktree(repo.path, repo.name, base, branch, this.notifyScriptPath, this.coordHookPath);
-			const tile = this.makeTile(worktree, repo.name, repo.path, base, false);
+			const tile = this.makeTile(worktree, repo.name, repo.path, base, false, undefined, opts.model);
 			if (opts.task) this.pendingTask.set(tile.tileId, opts.task);
 			if (this.stageEl) tile.render(this.stageEl);
 			this.tiles.push(tile);
@@ -921,7 +935,7 @@ export class TerminalsGrid {
 	}
 
 	/** Build a tile with all the grid callbacks wired. `resume` → claude --continue. */
-	private makeTile(worktree: WorktreeInfo, repoName: string, repoPath: string, baseBranch: string, resume: boolean, name?: string): TerminalTile {
+	private makeTile(worktree: WorktreeInfo, repoName: string, repoPath: string, baseBranch: string, resume: boolean, name?: string, model?: string): TerminalTile {
 		return new TerminalTile({
 			tileId: this.nextTileId++,
 			repoName, repoPath, baseBranch, worktree,
@@ -930,6 +944,7 @@ export class TerminalsGrid {
 			sessionEnv: this.deps.sessionEnv,
 			resume,
 			bypassPermissions: this.deps.bypassPermissions,
+			model,
 			name,
 			onRename: () => { void this.persist(); },
 			onRequestRename: (t, cur) => {
@@ -1002,7 +1017,7 @@ export class TerminalsGrid {
 			let exists = false;
 			try { await fs.access(rec.worktreePath); exists = true; } catch { exists = false; }
 			if (!exists) continue;
-			const tile = this.makeTile({ worktreePath: rec.worktreePath, branch: rec.branch }, rec.repoName, rec.repoPath, rec.baseBranch, true, rec.name);
+			const tile = this.makeTile({ worktreePath: rec.worktreePath, branch: rec.branch }, rec.repoName, rec.repoPath, rec.baseBranch, true, rec.name, rec.model);
 			try { await writeReadyHook(rec.worktreePath, this.notifyScriptPath, this.coordHookPath); } catch { /* best effort */ }
 			if (this.stageEl) tile.render(this.stageEl);
 			if (rec.hidden) { tile.setHidden(true); this.hidden.push(tile); }
