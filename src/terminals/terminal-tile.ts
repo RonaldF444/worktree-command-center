@@ -29,6 +29,7 @@ export interface TerminalTileOpts {
 	onReady?: (tile: TerminalTile) => void;
 	resume?: boolean;
 	bypassPermissions?: boolean;
+	model?: string;
 	name?: string;
 	onRename?: (tile: TerminalTile, name: string) => void;
 	onRequestRename?: (tile: TerminalTile, currentName: string) => void;
@@ -406,7 +407,7 @@ export class TerminalTile implements StageTile {
 	}
 
 	/** Serializable record for persistence. */
-	sessionRecord(): { worktreePath: string; branch: string; repoName: string; repoPath: string; baseBranch: string; name: string } {
+	sessionRecord(): { worktreePath: string; branch: string; repoName: string; repoPath: string; baseBranch: string; name: string; model?: string } {
 		return {
 			worktreePath: this.opts.worktree.worktreePath,
 			branch: this.opts.worktree.branch,
@@ -414,6 +415,7 @@ export class TerminalTile implements StageTile {
 			repoPath: this.opts.repoPath,
 			baseBranch: this.opts.baseBranch,
 			name: this.displayName,
+			...(this.opts.model ? { model: this.opts.model } : {}),
 		};
 	}
 
@@ -452,6 +454,7 @@ export class TerminalTile implements StageTile {
 	private startSession(resume: boolean, fallbackFresh = false): void {
 		const args = resume ? ['--continue'] : [];
 		if (this.opts.bypassPermissions) args.push('--dangerously-skip-permissions');
+		if (this.opts.model) args.push('--model', this.opts.model);
 		const ctxFile = this.writeContextFile();
 		if (ctxFile) args.push('--append-system-prompt-file', ctxFile);
 		const sidecarDir = path.dirname(this.opts.sidecarPath);
