@@ -2,6 +2,15 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { parseBoardLine, lockStatus, mergeEvents, isEvent, POLL_MS, type BoardEvent, type RawLine, type LockHolder } from './coordination';
 
+const COORD_COLLAPSE_KEY = 'cos-coord-collapsed';
+
+/** Whether the Coordination panel should start collapsed, given the persisted preference.
+ *  Default (nothing stored) = collapsed, so it never pops open on a workspace switch; only an
+ *  explicit '0' (the user expanded it) keeps it open. */
+export function coordBoardStartsCollapsed(stored: string | null): boolean {
+	return stored !== '0';
+}
+
 /** A collapsible panel showing the group's active locks + recent board feed, polled live. */
 export class BoardView {
 	private el: HTMLElement | null = null;
@@ -21,8 +30,18 @@ export class BoardView {
 
 	mount(parent: HTMLElement): void {
 		this.el = parent.createDiv({ cls: 'cos-coord-board' });
+		// Start as the user last left it (collapsed by default). mount() runs on every workspace
+		// switch, which otherwise re-created the panel with no 'collapsed' class → it popped open
+		// every time. Persist the toggle so the choice sticks across switches.
+		let stored: string | null = null;
+		try { stored = window.localStorage.getItem(COORD_COLLAPSE_KEY); } catch { /* no storage */ }
+		if (coordBoardStartsCollapsed(stored)) this.el.classList.add('collapsed');
 		const head = this.el.createDiv({ cls: 'cos-coord-head', text: '🛰 Coordination' });
-		head.addEventListener('click', () => this.el?.toggleClass('collapsed', !this.el.classList.contains('collapsed')));
+		head.addEventListener('click', () => {
+			const collapse = !this.el!.classList.contains('collapsed');
+			this.el?.toggleClass('collapsed', collapse);
+			try { window.localStorage.setItem(COORD_COLLAPSE_KEY, collapse ? '1' : '0'); } catch { /* no storage */ }
+		});
 		this.hiddenEl = this.el.createDiv({ cls: 'cos-coord-hidden' });
 		this.registryEl = this.el.createDiv({ cls: 'cos-coord-registry' });
 		this.locksEl = this.el.createDiv({ cls: 'cos-coord-locks' });
