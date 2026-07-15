@@ -18,6 +18,8 @@ declare global {
 	interface Window {
 		wcc: {
 			paths(): Promise<{ sidecarDir: string; userData: string }>;
+			clipboardRead(): Promise<string>;
+			clipboardWrite(text: string): Promise<boolean>;
 			getConfig(): Promise<any>;
 			setConfig(c: any): Promise<boolean>;
 			addFolder(): Promise<string | null>;

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, clipboard } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -71,6 +71,12 @@ function createWindow(): void {
 		urls: accessUrls(pickHosts(os.networkInterfaces(), os.hostname()), REMOTE_PORT, token),
 	}));
 }
+
+// Clipboard lives in the MAIN process (renderer-side electron.clipboard is deprecated).
+// Registered at module scope, not in createWindow(), so a re-created window can't
+// double-register the handlers.
+ipcMain.handle('clipboard:read', () => clipboard.readText());
+ipcMain.handle('clipboard:write', (_e, text: unknown) => { clipboard.writeText(String(text ?? '')); return true; });
 
 app.whenReady().then(createWindow);
 
