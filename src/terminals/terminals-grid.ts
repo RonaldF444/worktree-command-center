@@ -15,7 +15,7 @@ import { emptyState, applyKeystroke, onReady as rqReady, onSubmit as rqSubmit, o
 import { decideCenter, type SpotlightState } from './focus-decider';
 import { partitionByHidden } from './session-partition';
 import { GodConsole } from './god-console';
-import { slug as godSlug, formatFloorSnapshot, formatFloorIndex, parseOutboxMessage, resolveTellTarget, remapWatchers, EFFORT_LEVELS, type OutboxMessage } from './god';
+import { slug as godSlug, formatFloorSnapshot, formatFloorIndex, parseOutboxMessage, resolveTellTarget, remapWatchers, EFFORT_LEVELS, type OutboxMessage, type GodSelfImprove } from './god';
 import { looksLikeMenu, looksErrored, looksBusy } from './prompt-detect';
 import { looksLikePrompt } from './chat-room';
 import { classifyAttention, type AttentionItem } from './attention';
@@ -39,6 +39,7 @@ export interface GridDeps {
 	bypassPermissions: boolean;
 	linearConvert?: LinearConvertConfig;
 	sessionEnv?: () => Record<string, string>;
+	godSelfImprove?: GodSelfImprove;
 	toast: (msg: string) => void;
 	promptForTopic: (title: string, placeholder: string, initial?: string, okLabel?: string) => Promise<string | null>;
 }
@@ -619,7 +620,7 @@ export class TerminalsGrid {
 		if (!this.godConsole) {
 			const godHomeDir = path.join(this.coordDir, '..', '.god', this.deps.group);
 			const kane: GodConsole = new GodConsole(
-				{ repos: this.repos.map((r) => ({ name: r.name, path: r.path })), coordDir: this.coordDir, sidecarPath: this.sidecarPath, godHomeDir, sessionEnv: this.deps.sessionEnv, onFocusChange: (f) => { this.focusedKane = f ? kane : (this.focusedKane === kane ? null : this.focusedKane); } },
+				{ repos: this.repos.map((r) => ({ name: r.name, path: r.path })), coordDir: this.coordDir, sidecarPath: this.sidecarPath, godHomeDir, sessionEnv: this.deps.sessionEnv, selfImprove: this.deps.godSelfImprove, onFocusChange: (f) => { this.focusedKane = f ? kane : (this.focusedKane === kane ? null : this.focusedKane); } },
 				() => this.hideGod(),
 			);
 			this.godConsole = kane;
@@ -654,6 +655,7 @@ export class TerminalsGrid {
 				sidecarPath: this.sidecarPath,
 				godHomeDir,
 				sessionEnv: this.deps.sessionEnv,
+				selfImprove: this.deps.godSelfImprove,
 				onFocusChange: (f) => { this.focusedKane = f ? kane : (this.focusedKane === kane ? null : this.focusedKane); },
 				instanceName: `Kane ${n}`,
 				terminalId: String(-n),

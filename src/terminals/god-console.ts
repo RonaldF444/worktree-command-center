@@ -5,7 +5,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { SessionBridge, safeSessionEnv } from './session-bridge';
 import { readClipboardText, writeClipboardText } from './clipboard';
-import { godSystemPrompt, type GodRepo } from './god';
+import { godSystemPrompt, type GodRepo, type GodSelfImprove } from './god';
 import { scrollIntentForKey, type ScrollIntent } from './scroll-keys';
 import { FitThrottle } from './fit-throttle';
 import { ctrlClickActivator, openExternalUrl } from './links';
@@ -17,6 +17,7 @@ export interface GodConsoleOpts {
 	sidecarPath: string;
 	godHomeDir: string;   // a neutral cwd outside every repo
 	sessionEnv?: () => Record<string, string>;
+	selfImprove?: GodSelfImprove; // when set, Kane may improve his own source + build tools
 	onFocusChange?: (focused: boolean) => void;
 	instanceName?: string;   // head label + COS_TERMINAL_NAME (default 'Kane')
 	terminalId?: string;     // COS_TERMINAL_ID for cos-coord identity (default '0')
@@ -306,7 +307,10 @@ export class GodConsole {
 				'',
 			].join('\n'), 'utf8');
 			const settingsFile = path.join(this.opts.godHomeDir, '.claude', 'settings.json');
-			fs.writeFileSync(settingsFile, JSON.stringify({ permissions: { allow: ['Bash(cos-coord:*)'] } }, null, 2), 'utf8');
+			// With self-improvement enabled, Kane also gets prompt-free file edits + git/npm/node,
+			// or "he builds it and lets you know" would stall on a permission prompt per edit.
+			const allow = ['Bash(cos-coord:*)', ...(this.opts.selfImprove ? ['Edit', 'Write', 'Bash(git:*)', 'Bash(npm:*)', 'Bash(node:*)'] : [])];
+			fs.writeFileSync(settingsFile, JSON.stringify({ permissions: { allow } }, null, 2), 'utf8');
 		} catch { /* best effort — /personality still works, just with a permission prompt */ }
 	}
 
@@ -315,7 +319,7 @@ export class GodConsole {
 		try {
 			fs.mkdirSync(this.opts.godHomeDir, { recursive: true });
 			const file = path.join(this.opts.godHomeDir, 'god-system-prompt.md');
-			fs.writeFileSync(file, godSystemPrompt(this.opts.repos, this.opts.coordDir), 'utf8');
+			fs.writeFileSync(file, godSystemPrompt(this.opts.repos, this.opts.coordDir, this.opts.selfImprove), 'utf8');
 			return file;
 		} catch { return null; }
 	}

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   parseOutboxMessage, resolveTellTarget, slug,
-  formatFloorSnapshot, formatFloorIndex, godSystemPrompt, EFFORT_LEVELS, remapWatchers,
+  formatFloorSnapshot, formatFloorIndex, godSystemPrompt, EFFORT_LEVELS, remapWatchers, parseGodSelfImprove,
 } from '../src/terminals/god';
 
 describe('parseOutboxMessage', () => {
@@ -109,6 +109,39 @@ describe('godSystemPrompt', () => {
     expect(p).toContain('--effort low|medium|high|xhigh|max|ultracode');
     expect(p).toContain('--name');
     expect(p).toContain('cos-coord rename');
+  });
+});
+
+describe('godSystemPrompt self-improvement', () => {
+  const repos = [{ name: 'app', path: '/repos/app' }];
+  const si = { sourceRepo: 'C:\\dev\\wcc', toolsDir: 'C:\\dev\\kane-tools' };
+  it('is absent when not configured', () => {
+    expect(godSystemPrompt(repos, '/coord')).not.toContain('SELF-IMPROVEMENT');
+  });
+  it('names the source repo + tools dir and the guardrails when configured', () => {
+    const p = godSystemPrompt(repos, '/coord', si);
+    expect(p).toContain('SELF-IMPROVEMENT');
+    expect(p).toContain('C:\\dev\\wcc');
+    expect(p).toContain('C:\\dev\\kane-tools');
+    expect(p).toMatch(/never `git push`/i);
+    expect(p).toContain('install-local');
+    expect(p).toMatch(/stance is UNCHANGED/);
+  });
+  it('keeps the overseer stance either way', () => {
+    expect(godSystemPrompt(repos, '/coord', si)).toMatch(/do not run the floor/i);
+  });
+});
+
+describe('parseGodSelfImprove', () => {
+  it('accepts sourceRepo with optional toolsDir', () => {
+    expect(parseGodSelfImprove({ sourceRepo: 'C:\\x' })).toEqual({ sourceRepo: 'C:\\x', toolsDir: null });
+    expect(parseGodSelfImprove({ sourceRepo: 'C:\\x', toolsDir: 'C:\\t' })).toEqual({ sourceRepo: 'C:\\x', toolsDir: 'C:\\t' });
+  });
+  it('rejects junk without throwing', () => {
+    expect(parseGodSelfImprove(undefined)).toBeUndefined();
+    expect(parseGodSelfImprove('yes')).toBeUndefined();
+    expect(parseGodSelfImprove({ toolsDir: 'C:\\t' })).toBeUndefined();
+    expect(parseGodSelfImprove({ sourceRepo: '   ' })).toBeUndefined();
   });
 });
 

@@ -96,11 +96,44 @@ export function formatFloorIndex(tiles: FloorTile[]): string {
 
 export interface GodRepo { name: string; path: string; }
 
+/** Where Kane may improve himself: the app's own source repo + a dir for standalone tools. */
+export interface GodSelfImprove { sourceRepo: string; toolsDir: string; }
+
+/** Tolerant parse of config.json's `god` key — sourceRepo required, toolsDir optional
+ *  (the app fills a default). Never throws. */
+export function parseGodSelfImprove(v: unknown): { sourceRepo: string; toolsDir: string | null } | undefined {
+	if (!v || typeof v !== 'object') return undefined;
+	const o = v as Record<string, unknown>;
+	const ok = (x: unknown): x is string => typeof x === 'string' && x.trim() !== '';
+	if (!ok(o.sourceRepo)) return undefined;
+	return { sourceRepo: o.sourceRepo, toolsDir: ok(o.toolsDir) ? o.toolsDir : null };
+}
+
 /** GOD's appended system prompt — the entire control surface for "overseer, not boss". */
-export function godSystemPrompt(repos: GodRepo[], coordDir: string): string {
+export function godSystemPrompt(repos: GodRepo[], coordDir: string, selfImprove?: GodSelfImprove): string {
 	const repoLines = repos.length
 		? repos.map((r) => `  - ${r.name} → ${r.path}`).join('\n')
 		: '  (no repos added yet)';
+	const selfImproveLines = selfImprove ? [
+		'',
+		'SELF-IMPROVEMENT (the one standing exception to acting-only-on-request):',
+		`  - Your own source code lives at ${selfImprove.sourceRepo} — the Worktree Command Center app`,
+		'    you are running inside. When the floor shows you a CONCRETE, recurring need — an integration',
+		'    or capability that would clearly help the user — you may build it yourself. The bar: they',
+		'    would use it weekly. If unsure, ask here first instead of building. Never speculative',
+		'    features, never cosmetics, at most one self-improvement in flight, and leave days between',
+		'    them, not hours.',
+		'  - Method: create a git worktree of the source repo (NEVER edit the primary checkout), follow',
+		'    the repo\'s existing conventions and docs, run `npm test`, and merge into main locally only',
+		'    when green. Never `git push`. Never touch `private/`. NEVER run the app or',
+		'    `npm run install-local` — the installer kills every session on this floor, including you.',
+		`  - Standalone tools that do not belong in the app go in ${selfImprove.toolsDir} — same bar,`,
+		'    same rules. Prefer a small tool there over an app change when it serves the same need.',
+		'  - Afterwards, announce it: run  cos-coord note "Kane: built <thing> — npm run install-local to get it"',
+		'    and summarize here what you built and why. The user decides when to reinstall.',
+		'  - Everything else about your stance is UNCHANGED: you still do not run the floor or act',
+		'    unprompted — this exception covers only building things that help the user.',
+	] : [];
 	return [
 		'You are Kane, the overseer of the Worktree Command Center floor — a single Claude Code',
 		'session the user opens in a side console to consult on demand.',
@@ -135,5 +168,6 @@ export function godSystemPrompt(repos: GodRepo[], coordDir: string): string {
 		'',
 		'REPOS ON THE FLOOR (name → path):',
 		repoLines,
+		...selfImproveLines,
 	].join('\n');
 }

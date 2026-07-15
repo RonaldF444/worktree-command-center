@@ -3,6 +3,7 @@ import { toast } from './ui/toast';
 import { promptForTopic } from './ui/prompt-dialog';
 import { TerminalsGrid, type GridDeps, type RepoConfig } from './terminals/terminals-grid';
 import { parseLinearConvertConfig } from './terminals/linear-convert-probe';
+import { parseGodSelfImprove } from './terminals/god';
 import { discoverRepos, mergeRepos } from './workspace';
 import { UsageProbe } from './terminals/usage-probe';
 import { UsageWidget } from './ui/usage-widget';
@@ -11,6 +12,7 @@ import { WorkspaceBar } from './ui/workspace-bar';
 import { normalizeWorkspaces, addWorkspace, closeWorkspace, nextActiveAfter, type Workspace } from './terminals/workspace-store';
 import * as path from 'path';
 import * as fs from 'fs';
+import * as os from 'os';
 import { registerPrivateFeatures } from 'wcc-private';
 import type { SessionEnvProvider } from './private-api';
 
@@ -80,6 +82,11 @@ async function main(): Promise<void> {
 		startUsageProbe();
 		window.addEventListener('beforeunload', () => { usageWidget?.dispose(); usageProbe?.dispose(); });
 
+		// Kane self-improvement (see docs/superpowers/specs/2026-07-15-kane-self-improvement-design.md):
+		// config names the app's own source repo; toolsDir defaults beside the user's home.
+		const siCfg = parseGodSelfImprove(cfg.god);
+		const godSelfImprove = siCfg ? { sourceRepo: siCfg.sourceRepo, toolsDir: siCfg.toolsDir ?? path.join(os.homedir(), 'kane-tools') } : undefined;
+
 		const depsFor = (id: string): GridDeps => ({
 			repos,
 			group: id,
@@ -90,6 +97,7 @@ async function main(): Promise<void> {
 			sessionsFile: path.join(userData, '.terminal-sessions.json'),
 			bypassPermissions: true,
 			linearConvert: parseLinearConvertConfig(cfg.linearConvert),
+			godSelfImprove,
 			sessionEnv: () => sessionEnvProvider({ workspaceId: id }),
 			toast,
 			promptForTopic,
