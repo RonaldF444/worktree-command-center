@@ -213,7 +213,7 @@ export class TerminalsGrid {
 		const refreshBtn = controls.createEl('button', { text: '⟳ Refresh' });
 		refreshBtn.addEventListener('click', () => { void this.scanWorktrees().then(() => this.board?.refresh()); });
 
-		const journalBtn = controls.createEl('button', { text: '📓 Journal Entry', cls: 'cos-journal-btn', attr: { title: 'Open a new journal entry tile' } });
+		const journalBtn = controls.createEl('button', { text: '📓 Journal Entry', cls: 'cos-journal-btn', attr: { title: 'Open a new journal entry tile (Alt+J)' } });
 		journalBtn.addEventListener('click', () => this.spawnJournal());
 
 		if (!this.board) this.board = new BoardView(
@@ -333,6 +333,9 @@ export class TerminalsGrid {
 			// Alt+K opens/focuses Kane. Kane wins this key — the letter-badge jumps only reach 'K'
 			// with 23+ visible tiles, which never happens in practice.
 			if (e.key === 'k' || e.key === 'K') { e.preventDefault(); this.openKane(); return; }
+			// Alt+J opens a new journal entry. Like Alt+K, this shadows the letter badges only
+			// at 22+ visible tiles (badges run F1–F12 then A…), which never happens in practice.
+			if (e.key === 'j' || e.key === 'J') { e.preventDefault(); this.spawnJournal(); return; }
 			const norm = e.key.length === 1 ? e.key.toUpperCase() : e.key;
 			const idx = keyToIndex(norm);
 			if (idx !== null && this.tiles[idx]) { e.preventDefault(); this.handleClick(this.tiles[idx]!.tileId); }
