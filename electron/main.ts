@@ -36,6 +36,16 @@ function createWindow(): void {
 
 	win.loadFile(path.join(__dirname, '..', 'index.html'));
 
+	// F11 toggles native fullscreen. before-input-event fires ahead of the page AND
+	// (via preventDefault) suppresses the default menu's own F11 accelerator, so the
+	// toggle can't fire twice and works no matter which tile has focus.
+	win.webContents.on('before-input-event', (event, input) => {
+		if (input.type === 'keyDown' && input.key === 'F11' && !input.isAutoRepeat && win) {
+			event.preventDefault();
+			win.setFullScreen(!win.isFullScreen());
+		}
+	});
+
 	// IPC: return resolved paths
 	ipcMain.handle('paths', () => ({ sidecarDir, userData }));
 
