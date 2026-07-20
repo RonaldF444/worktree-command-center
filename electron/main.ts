@@ -39,8 +39,9 @@ function createWindow(): void {
 	// F11 toggles native fullscreen. before-input-event fires ahead of the page AND
 	// (via preventDefault) suppresses the default menu's own F11 accelerator, so the
 	// toggle can't fire twice and works no matter which tile has focus.
+	// Modifiers are excluded: Alt+F11 is the renderer's badge jump to the 11th visible tile.
 	win.webContents.on('before-input-event', (event, input) => {
-		if (input.type === 'keyDown' && input.key === 'F11' && !input.isAutoRepeat && win) {
+		if (input.type === 'keyDown' && input.key === 'F11' && !input.alt && !input.control && !input.meta && !input.shift && !input.isAutoRepeat && win) {
 			event.preventDefault();
 			win.setFullScreen(!win.isFullScreen());
 		}

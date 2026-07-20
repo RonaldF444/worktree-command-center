@@ -335,7 +335,7 @@ export class TerminalsGrid {
 			if (e.key === 'k' || e.key === 'K') { e.preventDefault(); this.openKane(); return; }
 			// Alt+J opens a new journal entry. Like Alt+K, this shadows the letter badges only
 			// at 22+ visible tiles (badges run F1–F12 then A…), which never happens in practice.
-			if (e.key === 'j' || e.key === 'J') { e.preventDefault(); this.spawnJournal(); return; }
+			if (e.key === 'j' || e.key === 'J') { e.preventDefault(); if (!e.repeat) this.spawnJournal(); return; }
 			const norm = e.key.length === 1 ? e.key.toUpperCase() : e.key;
 			const idx = keyToIndex(norm);
 			if (idx !== null && this.tiles[idx]) { e.preventDefault(); this.handleClick(this.tiles[idx]!.tileId); }
