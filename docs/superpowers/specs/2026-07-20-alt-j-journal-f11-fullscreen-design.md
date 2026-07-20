@@ -49,7 +49,7 @@ if (e.key === 'j' || e.key === 'J') { e.preventDefault(); this.spawnJournal(); r
 // (via preventDefault) suppresses the default menu's own F11 accelerator, so the
 // toggle can't fire twice and works no matter which tile has focus.
 win.webContents.on('before-input-event', (event, input) => {
-	if (input.type === 'keydown' && input.key === 'F11' && !input.isAutoRepeat && win) {
+	if (input.type === 'keyDown' && input.key === 'F11' && !input.isAutoRepeat && win) {
 		event.preventDefault();
 		win.setFullScreen(!win.isFullScreen());
 	}
