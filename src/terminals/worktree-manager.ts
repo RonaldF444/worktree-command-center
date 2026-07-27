@@ -1,5 +1,5 @@
 import * as path from 'path';
-import * as fsp from 'fs/promises';
+import * as fs from 'fs';
 import { runCommand } from '../command-runner';
 import { isParkCommitSubject, parkCommitSubject } from './worktree-registry';
 
@@ -59,10 +59,10 @@ export async function listBranches(repoPath: string): Promise<string[]> {
 	return r.stdout.split('\n').map((l) => l.trim()).filter((l) => l.length > 0);
 }
 
-/** The .claude/settings.local.json content: the .cos-ready marker hook (Stop/Notification),
+/** The session settings content: the .cos-ready marker hook (Stop/Notification),
  *  the coordination hooks (PreToolUse acquire / PostToolUse release) on Bash, and a
  *  pre-approval of `cos-coord` so agents chat/coordinate with each other without prompting. */
-export function settingsLocalJson(notifyScriptAbsPath: string, coordHookAbsPath: string): string {
+export function worktreeSettingsJson(notifyScriptAbsPath: string, coordHookAbsPath: string): string {
 	const ready = [{ hooks: [{ type: 'command', command: `node "${notifyScriptAbsPath}"` }] }];
 	const coord = (extra: string) => [{ matcher: 'Bash', hooks: [{ type: 'command', command: `node "${coordHookAbsPath}"${extra}` }] }];
 	return JSON.stringify({
@@ -71,24 +71,34 @@ export function settingsLocalJson(notifyScriptAbsPath: string, coordHookAbsPath:
 	}, null, 2);
 }
 
-/** Write the scoped hooks (ready marker + coordination) into a worktree. */
-export async function writeReadyHook(worktreePath: string, notifyScriptAbsPath: string, coordHookAbsPath: string): Promise<void> {
-	const dir = path.join(worktreePath, '.claude');
-	await fsp.mkdir(dir, { recursive: true });
-	await fsp.writeFile(path.join(dir, 'settings.local.json'), settingsLocalJson(notifyScriptAbsPath, coordHookAbsPath), 'utf8');
+/** Where the shared settings file lives: beside the sidecar, NEVER inside a worktree.
+ *  The content is identical for every terminal (it depends only on the two script paths),
+ *  so one file serves them all and is passed to each session via `claude --settings`. */
+export function worktreeSettingsPath(sidecarDir: string): string {
+	return path.join(sidecarDir, 'settings', 'worktree-settings.json');
+}
+
+/** Write the shared settings file. Writing it OUTSIDE the worktree is the point: a repo may
+ *  legitimately TRACK its own `.claude/settings.local.json`, and writing ours on top of that
+ *  clobbered the repo's shared config, left every worktree permanently dirty with that one
+ *  file, and let parkWorktree(`git add -A`) commit the deletion onto the branch. Mirrors
+ *  writeContextFile's "never dirty the worktree" rule. Synchronous so the file is guaranteed
+ *  present before any session spawns. */
+export function writeWorktreeSettings(sidecarDir: string, notifyScriptAbsPath: string, coordHookAbsPath: string): string {
+	const file = worktreeSettingsPath(sidecarDir);
+	fs.mkdirSync(path.dirname(file), { recursive: true });
+	fs.writeFileSync(file, worktreeSettingsJson(notifyScriptAbsPath, coordHookAbsPath), 'utf8');
+	return file;
 }
 
 /** Create a fresh worktree on a NEW branch based on baseBranch. Throws on git failure. */
 export async function createWorktree(
-	repoPath: string, repoName: string, baseBranch: string, branch: string, notifyScriptAbsPath?: string, coordHookAbsPath?: string,
+	repoPath: string, repoName: string, baseBranch: string, branch: string,
 ): Promise<WorktreeInfo> {
 	const worktreePath = worktreePathFor(repoPath, repoName, branch);
 	const r = await runCommand('git', ['worktree', 'add', worktreePath, '-b', branch, baseBranch], { cwd: repoPath, timeoutMs: 20000 });
 	if (r.code !== 0) {
 		throw new Error((r.error ?? r.stderr).split('\n')[0] || 'git worktree add failed');
-	}
-	if (notifyScriptAbsPath && coordHookAbsPath) {
-		try { await writeReadyHook(worktreePath, notifyScriptAbsPath, coordHookAbsPath); } catch { /* hooks are best-effort */ }
 	}
 	return { worktreePath, branch };
 }

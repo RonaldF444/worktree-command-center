@@ -24,6 +24,7 @@
   "dependencies": {
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/addon-web-links": "^0.12.0",
+    "@xterm/addon-webgl": "^0.19.0",
     "@xterm/xterm": "^6.0.0",
     "node-pty": "^1.1.0"
   },
@@ -45,12 +46,21 @@
       {
         "from": "pty-sidecar",
         "to": "pty-sidecar",
-        "filter": ["**/*", "!contexts/**"]
+        "filter": [
+          "**/*",
+          "!contexts/**"
+        ]
       },
       {
         "from": "node_modules/node-pty",
         "to": "pty-sidecar/node_modules/node-pty",
-        "filter": ["**/*", "!build/**", "!src/**", "!deps/**", "!third_party/**"]
+        "filter": [
+          "**/*",
+          "!build/**",
+          "!src/**",
+          "!deps/**",
+          "!third_party/**"
+        ]
       }
     ],
     "win": {

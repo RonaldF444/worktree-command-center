@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { emptyState, applyKeystroke, onReady, onSubmit, onClose, onClick, cycleNext, cyclePrev } from '../src/terminals/ready-queue';
+import { emptyState, applyKeystroke, onReady, onSubmit, onClose, onClick, onOverview } from '../src/terminals/ready-queue';
 
 describe('applyKeystroke (input-box length)', () => {
 	it('counts printable chars', () => {
@@ -24,69 +24,94 @@ describe('applyKeystroke (input-box length)', () => {
 	});
 });
 
-describe('ready stack — LIFO + dedupe + submit-pop', () => {
-	it('newest centers; a re-fire of an already-ready tile does NOT re-center (no flicker)', () => {
-		let s = emptyState();
-		let r;
-		r = onReady(s, 1); s = r.state; expect(r.center).toBe(1);
-		r = onReady(s, 2); s = r.state; expect(r.center).toBe(2);
-		r = onReady(s, 3); s = r.state; expect(r.center).toBe(3); // stack [1,2,3], top 3
-		r = onReady(s, 1); s = r.state; expect(r.center).toBeNull(); // 1 already ready → no re-center
-		r = onReady(s, 3); s = r.state; expect(r.center).toBeNull(); // top re-fires → no re-center
-		// finish the centered (top = 3) → pop → center next-newest (2)
-		r = onSubmit(s, 3); s = r.state; expect(r.center).toBe(2);
-		r = onSubmit(s, 2); s = r.state; expect(r.center).toBe(1);
-		r = onSubmit(s, 1); s = r.state; expect(r.center).toBeNull();
-	});
-});
-
-describe('hold while actively typing', () => {
-	it('a ready while text is in the box is recorded but not centered', () => {
-		let s = { ...emptyState(), composingLen: 4 };
-		const r = onReady(s, 9);
-		expect(r.center).toBeNull();
-		expect(r.state.stack).toContain(9);
-	});
-	it('centers when the box is empty', () => {
-		const r = onReady(emptyState(), 9);
-		expect(r.center).toBe(9);
-	});
-});
-
-describe('onClick + cycle (F + G)', () => {
-	const built = () => {
-		let s = emptyState();
-		s = onReady(s, 1).state; s = onReady(s, 2).state; s = onReady(s, 3).state; // [1,2,3], top=3
-		return s;
-	};
-	it('onClick moves the tile to the top and centers it', () => {
-		const r = onClick(built(), 1);
-		expect(r.center).toBe(1);
-		expect(r.state.stack).toEqual([2, 3, 1]);
-	});
-	it('cycleNext sends current to back, centers next; cyclePrev reverses', () => {
-		const n = cycleNext(built());          // [1,2,3] → [3,1,2], top 2
-		expect(n.center).toBe(2);
-		expect(n.state.stack).toEqual([3, 1, 2]);
-		const p = cyclePrev(n.state);          // reverse → [1,2,3], top 3
-		expect(p.center).toBe(3);
-		expect(p.state.stack).toEqual([1, 2, 3]);
-	});
-	it('cycle is a no-op with fewer than 2 tiles', () => {
-		expect(cycleNext(onReady(emptyState(), 5).state).center).toBe(5);
-		expect(cyclePrev(emptyState()).center).toBeNull();
-	});
-});
-
-describe('onClose', () => {
-	it('drops the tile and centers next-newest only if it was centered', () => {
+describe('FIFO ready queue (2026-07-24 spec: first finished, first served)', () => {
+	it('appends new ready tiles at the back; front = waiting longest', () => {
 		let s = emptyState();
 		s = onReady(s, 1).state;
-		s = onReady(s, 2).state; // stack [1,2]
-		const r = onClose(s, 2, true); // close the centered (top) one
-		expect(r.center).toBe(1);
-		expect(r.state.stack).toEqual([1]);
-		const r2 = onClose(emptyState(), 5, false);
-		expect(r2.center).toBeNull();
+		s = onReady(s, 2).state;
+		s = onReady(s, 3).state;
+		expect(s.queue).toEqual([1, 2, 3]);
+	});
+
+	it('marks whether the tile was newly added (re-fires are not steal events)', () => {
+		let s = emptyState();
+		const first = onReady(s, 7);
+		expect(first.added).toBe(true);
+		const again = onReady(first.state, 7);
+		expect(again.added).toBe(false);
+		expect(again.state.queue).toEqual([7]);
+	});
+
+	it('onSubmit removes the tile, clears an identical pin, resets composing', () => {
+		let s = emptyState();
+		s = onReady(s, 1).state;
+		s = onReady(s, 2).state;
+		s = onClick(s, 1).state;
+		s = { ...s, composingLen: 4 };
+		const r = onSubmit(s, 1);
+		expect(r.state.queue).toEqual([2]);
+		expect(r.state.pinnedId).toBeNull();
+		expect(r.state.composingLen).toBe(0);
+	});
+
+	it('onSubmit to one tile leaves another pin alone', () => {
+		let s = emptyState();
+		s = onReady(s, 1).state;
+		s = onClick(s, 9).state;
+		expect(onSubmit(s, 1).state.pinnedId).toBe(9);
+	});
+
+	it('onClose removes the tile and clears an identical pin', () => {
+		let s = emptyState();
+		s = onReady(s, 1).state;
+		s = onClick(s, 1).state;
+		const r = onClose(s, 1);
+		expect(r.state.queue).toEqual([]);
+		expect(r.state.pinnedId).toBeNull();
+	});
+
+	it('onClick pins the tile WITHOUT inserting it into the queue', () => {
+		let s = emptyState();
+		s = onReady(s, 1).state;
+		const r = onClick(s, 9); // clicked a busy (not-ready) tile
+		expect(r.state.pinnedId).toBe(9);
+		expect(r.state.queue).toEqual([1]);
+	});
+
+	it('clicking away from a centered ready tile demotes it to the BACK of the queue', () => {
+		let s = emptyState();
+		s = onReady(s, 1).state; // 1 finished first (and held the center)
+		s = onReady(s, 2).state;
+		s = onReady(s, 3).state;
+		const r = onClick(s, 5, 1); // user clicks tile 5 while ready tile 1 was centered
+		expect(r.state.queue).toEqual([2, 3, 1]); // 1 lost its front spot
+		expect(r.state.pinnedId).toBe(5);
+	});
+
+	it('clicking the centered ready tile itself does not demote it', () => {
+		let s = emptyState();
+		s = onReady(s, 1).state;
+		s = onReady(s, 2).state;
+		const r = onClick(s, 1, 1);
+		expect(r.state.queue).toEqual([1, 2]);
+		expect(r.state.pinnedId).toBe(1);
+	});
+
+	it('clicking away from a centered tile that is NOT in the queue changes nothing but the pin', () => {
+		let s = emptyState();
+		s = onReady(s, 2).state;
+		const r = onClick(s, 5, 4); // 4 was centered but never ready
+		expect(r.state.queue).toEqual([2]);
+		expect(r.state.pinnedId).toBe(5);
+	});
+
+	it('onOverview (cycled to the equal grid) marks everything seen: queue + pin cleared', () => {
+		let s = emptyState();
+		s = onReady(s, 1).state;
+		s = onReady(s, 2).state;
+		s = onClick(s, 1).state;
+		const r = onOverview(s);
+		expect(r.state.queue).toEqual([]);
+		expect(r.state.pinnedId).toBeNull();
 	});
 });

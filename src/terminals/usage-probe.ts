@@ -49,7 +49,8 @@ export class UsageProbe {
 		// Bundling "/usage\r" into one write makes the sidecar/ConPTY coalesce it so the \r lands
 		// as a pasted newline that never submits — which is why the battery read 0 (it never ran).
 		b.write('/usage');
-		window.setTimeout(() => this.bridge?.write('\r'), 60);
+		// 200ms: match TerminalTile.sendLine — the new TUI's wider paste window eats a fast \r.
+		window.setTimeout(() => this.bridge?.write('\r'), 200);
 		const readout = await new Promise<UsageReadout>((resolve) => {
 			const started = Date.now();
 			const iv = window.setInterval(() => {

@@ -1,13 +1,16 @@
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
+import { WebglAddon } from '@xterm/addon-webgl';
 import * as fs from 'fs';
 import * as path from 'path';
 import { SessionBridge, safeSessionEnv } from './session-bridge';
 import { readClipboardText, writeClipboardText } from './clipboard';
-import { removeWorktreeAndBranch, terminalSystemPrompt, type WorktreeInfo } from './worktree-manager';
+import { removeWorktreeAndBranch, terminalSystemPrompt, worktreeSettingsPath, type WorktreeInfo } from './worktree-manager';
 import { scrollIntentForKey, type ScrollIntent } from './scroll-keys';
 import { FitThrottle } from './fit-throttle';
+import { HiddenOutputBuffer } from './hidden-buffer';
+import { activeTerminalPalette, activeTerminalFont, type TerminalPalette } from './theme-store';
 import { ctrlClickActivator, openExternalUrl } from './links';
 import { promptForConfirm } from '../ui/prompt-dialog';
 import type { StageTile } from './stage-tile';
@@ -57,6 +60,15 @@ export class TerminalTile implements StageTile {
 	private pasting = false;
 	private selected = false;
 	private idle = false; // false = busy/starting; true once the session goes ready (refresh confirms only when busy)
+	// Output pacing: only the CENTERED tile parses PTY output in true real time. Visible
+	// satellites batch on a 300ms cadence and hidden/workspace-detached tiles on 2s —
+	// several sessions streaming at once otherwise starve the renderer's event loop in
+	// sub-250ms increments (measured as continuous heartbeat 'gap' stalls, 2026-07-22).
+	private minimized = false;
+	private detachedFromStage = false;
+	private currentMode: 'live' | 'visible' | 'suspended' = 'live';
+	private hiddenBuf = new HiddenOutputBuffer();
+	private flushTimer: number | null = null;
 	readonly isJournal = false;
 
 	constructor(private opts: TerminalTileOpts) {
@@ -103,7 +115,7 @@ export class TerminalTile implements StageTile {
 		}, true);
 		body.addEventListener('mouseup', (e) => { if (swallowingClick) { e.preventDefault(); e.stopImmediatePropagation(); } }, true);
 		body.addEventListener('click', (e) => { if (swallowingClick) { e.preventDefault(); e.stopImmediatePropagation(); swallowingClick = false; } }, true);
-		this.term = new Terminal({ fontSize: 12, convertEol: false, cursorBlink: true, scrollback: 5000, theme: { background: '#0e0f17' },
+		this.term = new Terminal({ fontSize: 12, convertEol: false, cursorBlink: false, scrollback: 5000, theme: activeTerminalPalette(), ...activeTerminalFont(),
 			// OSC 8 terminal hyperlinks (the new Claude TUI emits links this way) — open them in the
 			// real browser on Ctrl/Cmd+click. WITHOUT this, xterm's OscLinkProvider falls back to its
 			// built-in "Do you want to navigate… could be dangerous" confirm instead of opening.
@@ -112,6 +124,14 @@ export class TerminalTile implements StageTile {
 		this.fit = new FitAddon();
 		this.term.loadAddon(this.fit);
 		this.term.open(body);
+		// GPU-accelerated rendering: the DOM renderer chokes with many tiles. Must load after
+		// open(); on WebGL context loss (too many contexts / driver reset) dispose the addon —
+		// xterm then falls back to the DOM renderer for this tile only.
+		try {
+			const gl = new WebglAddon();
+			gl.onContextLoss(() => gl.dispose());
+			this.term.loadAddon(gl);
+		} catch { /* no GPU/context available — DOM renderer remains */ }
 		// Ctrl/Cmd+click a URL (e.g. http://localhost:5173) to open it in the real browser.
 		this.term.loadAddon(new WebLinksAddon(ctrlClickActivator(openExternalUrl)));
 		// Ctrl/Cmd+C copies the selection if there is one (otherwise ^C falls through as an
@@ -199,6 +219,9 @@ export class TerminalTile implements StageTile {
 				}
 			});
 		} catch { /* worktree gone / watch unsupported */ }
+
+		// Tiles render uncentered: start on the satellite cadence until setCentered says otherwise.
+		this.updateSuspension();
 	}
 
 	/** Position/size the tile (absolute, in stage coords). Refits the terminal after the move. */
@@ -226,6 +249,7 @@ export class TerminalTile implements StageTile {
 	setCentered(on: boolean): void {
 		this.centered = on;
 		this.el?.toggleClass('centered', on);
+		this.updateSuspension(); // centered = live output; satellites batch (300ms)
 		if (on) this.fitSoon(); // fit the PTY to the centered size (after the size animation settles)
 		else this.term?.scrollToBottom(); // leaving center: snap the (un-refit) satellite to its latest line
 	}
@@ -258,7 +282,68 @@ export class TerminalTile implements StageTile {
 	setHidden(on: boolean): void {
 		if (!this.el) return;
 		this.el.style.display = on ? 'none' : '';
+		this.minimized = on;
+		this.updateSuspension();
 		if (!on) this.fitSoon(); // re-show: the term was display:none, so refit to the stage
+	}
+
+	/** Workspace switched away/back: the stage DOM is detached but the session keeps running.
+	 *  Suspends live xterm parsing exactly like minimize does. */
+	setDetached(on: boolean): void {
+		this.detachedFromStage = on;
+		this.updateSuspension();
+	}
+
+	private outputMode(): 'live' | 'visible' | 'suspended' {
+		if (this.minimized || this.detachedFromStage) return 'suspended';
+		return this.centered ? 'live' : 'visible';
+	}
+
+	/** Re-pace output on state edges only. Entering 'live' (centered) drains immediately so
+	 *  the reveal shows the current screen; batching modes install their cadence timer. */
+	private updateSuspension(): void {
+		const mode = this.outputMode();
+		if (mode === this.currentMode) return;
+		this.currentMode = mode;
+		if (this.flushTimer !== null) { window.clearInterval(this.flushTimer); this.flushTimer = null; }
+		this.flushSuspended(); // mode boundary: drain what the old cadence left pending
+		if (mode !== 'live') this.flushTimer = window.setInterval(() => this.flushSuspended(), mode === 'visible' ? 300 : 2000);
+	}
+
+	/** Drain the pending window into xterm. A dropped window means the tile flooded past the
+	 *  cap — its bytes are stale alternate-screen frames, so instead of parsing a partial tail
+	 *  we ask ConPTY to re-emit the CURRENT screen via a resize nudge. */
+	private flushSuspended(): void {
+		const { data, dropped } = this.hiddenBuf.takeAll();
+		if (dropped) this.nudgeRepaint();
+		else if (data) this.term?.write(data);
+	}
+
+	/** Bounce the PTY one row and back: each real resize makes ConPTY re-emit the full screen,
+	 *  restoring an accurate display after dropped output. */
+	private nudgeRepaint(): void {
+		const t = this.term;
+		if (!t || !this.bridge) return;
+		const { cols, rows } = t;
+		this.bridge.resize(cols, rows + 1);
+		window.setTimeout(() => this.bridge?.resize(cols, rows), 50);
+	}
+
+	/** Route session output to xterm — or, in a batching mode, into the pending buffer. */
+	private writeOut(d: string): void {
+		if (this.currentMode !== 'live') this.hiddenBuf.push(d);
+		else this.term?.write(d);
+	}
+
+	/** Re-tint the terminal well live (theme switch — see theme-store). Font weight and the
+	 *  contrast floor travel with the palette: light wells need both to read well. */
+	setTerminalPalette(p: TerminalPalette): void {
+		if (!this.term) return;
+		this.term.options.theme = p;
+		const f = activeTerminalFont();
+		this.term.options.fontWeight = f.fontWeight as never;
+		this.term.options.fontWeightBold = f.fontWeightBold as never;
+		this.term.options.minimumContrastRatio = f.minimumContrastRatio;
 	}
 
 	/** Give this terminal keyboard focus so typing goes here. */
@@ -280,7 +365,14 @@ export class TerminalTile implements StageTile {
 		// the text registers as a real Enter (the same reason the Approve button's lone
 		// sendKeys("\r") submits a prompt). The delay forces a separate PTY read so ConPTY
 		// can't coalesce the two writes back into one chunk.
-		window.setTimeout(() => this.bridge?.write('\r'), 40);
+		// 250ms: the 2026-07 Claude TUI widened its paste-coalescing window — a \r landing
+		// ~40ms after the text now reads as a pasted newline (sits in the box, unsent).
+		window.setTimeout(() => this.bridge?.write('\r'), 250);
+		// Belt-and-braces second Enter: on a FRESH session the TUI can still be booting (or a
+		// long task string still coalescing) when the first \r lands, leaving the message in
+		// the box (Kane spawn, 2026-07-24). If the first Enter submitted, this one lands on an
+		// empty input box and is a no-op.
+		window.setTimeout(() => this.bridge?.write('\r'), 900);
 	}
 
 	/** Send raw keystrokes verbatim (no auto-Enter) — used to answer prompts from the
@@ -413,6 +505,8 @@ export class TerminalTile implements StageTile {
 
 	/** Tear down the session + DOM WITHOUT touching the worktree (used on page switch). */
 	kill(): void {
+		if (this.flushTimer !== null) { window.clearInterval(this.flushTimer); this.flushTimer = null; }
+		this.hiddenBuf.clear();
 		this.readyWatcher?.close();
 		this.readyWatcher = null;
 		this.resizeObs?.disconnect();
@@ -446,6 +540,9 @@ export class TerminalTile implements StageTile {
 		const ctxFile = this.writeContextFile();
 		if (ctxFile) args.push('--append-system-prompt-file', ctxFile);
 		const sidecarDir = path.dirname(this.opts.sidecarPath);
+		// Hooks + cos-coord pre-approval come from a shared file outside the worktree (written by
+		// the grid), so we never write into the repo's own .claude/ — see writeWorktreeSettings.
+		args.push('--settings', worktreeSettingsPath(sidecarDir));
 		const env: Record<string, string> = {
 			...safeSessionEnv(this.opts.sessionEnv),
 			COS_COORD_DIR: this.opts.coordDir,
@@ -455,14 +552,15 @@ export class TerminalTile implements StageTile {
 		};
 		let probe = ''; // first bytes only (capped) — used to detect the --continue "no conversation" exit
 		this.bridge = new SessionBridge(this.opts.sidecarPath, this.opts.worktree.worktreePath, 'claude', args, env);
-		this.bridge.onData((d) => { if (fallbackFresh && probe.length < 2048) probe += d; this.term?.write(d); });
+		this.bridge.onData((d) => { if (fallbackFresh && probe.length < 2048) probe += d; this.writeOut(d); });
 		this.bridge.onExit((code) => {
 			if (fallbackFresh && /no conversation found to continue/i.test(probe)) {
+				this.hiddenBuf.clear();      // stale pre-reset output must not replay after the reset
 				this.term?.reset();          // --continue had nothing to resume → start fresh in place
 				this.startSession(false);
 				return;
 			}
-			this.term?.write(`\r\n[session ended (code ${code ?? '?'})]\r\n`);
+			this.writeOut(`\r\n[session ended (code ${code ?? '?'})]\r\n`);
 		});
 		this.bridge.onReady(() => { this.idle = true; this.opts.onReady?.(this); });
 		this.bridge.start();
@@ -488,6 +586,7 @@ export class TerminalTile implements StageTile {
 	 *  the new session env at once; the env is re-read inside startSession. */
 	restartInPlace(): void {
 		this.bridge?.kill();
+		this.hiddenBuf.clear(); // old-session output must not replay into the fresh screen
 		this.term?.reset();
 		this.idle = false;
 		this.startSession(true, true);

@@ -1,6 +1,8 @@
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
+import { WebglAddon } from '@xterm/addon-webgl';
+import { activeTerminalPalette, activeTerminalFont, type TerminalPalette } from './theme-store';
 import * as fs from 'fs';
 import * as path from 'path';
 import { SessionBridge, safeSessionEnv } from './session-bridge';
@@ -21,6 +23,7 @@ export interface GodConsoleOpts {
 	onFocusChange?: (focused: boolean) => void;
 	instanceName?: string;   // head label + COS_TERMINAL_NAME (default 'Kane')
 	terminalId?: string;     // COS_TERMINAL_ID for cos-coord identity (default '0')
+	resume?: boolean;        // open with --continue (fresh fallback) — the main Kane sets this
 }
 
 /** GOD: a single privileged claude session in a docked side panel. Real terminal — the
@@ -84,7 +87,7 @@ export class GodConsole {
 		hide.addEventListener('click', (e) => { e.stopPropagation(); this.onHide(); });
 
 		this.bodyEl = this.el.createDiv({ cls: 'cos-god-body' });
-		this.term = new Terminal({ fontSize: 12, convertEol: false, cursorBlink: true, scrollback: 5000, theme: { background: '#0e0f17' },
+		this.term = new Terminal({ fontSize: 12, convertEol: false, cursorBlink: false, scrollback: 5000, theme: activeTerminalPalette(), ...activeTerminalFont(),
 			// OSC 8 hyperlinks from the new Claude TUI — open in the real browser on Ctrl/Cmd+click
 			// instead of xterm's built-in "navigate… could be dangerous" confirm (no linkHandler set).
 			linkHandler: { activate: (e, uri) => { if (e.ctrlKey || e.metaKey) openExternalUrl(uri); } },
@@ -92,6 +95,13 @@ export class GodConsole {
 		this.fit = new FitAddon();
 		this.term.loadAddon(this.fit);
 		this.term.open(this.bodyEl);
+		// GPU-accelerated rendering, mirroring TerminalTile: load after open(); on context
+		// loss dispose → xterm falls back to the DOM renderer for this console only.
+		try {
+			const gl = new WebglAddon();
+			gl.onContextLoss(() => gl.dispose());
+			this.term.loadAddon(gl);
+		} catch { /* no GPU/context available — DOM renderer remains */ }
 		// Ctrl/Cmd+click a URL to open it in the real browser.
 		this.term.loadAddon(new WebLinksAddon(ctrlClickActivator(openExternalUrl)));
 		// Clipboard + scrollback keys, mirroring TerminalTile: Ctrl/Cmd+V pastes (xterm would
@@ -152,7 +162,9 @@ export class GodConsole {
 		this.fitSoon();
 
 		this.term.onData((d) => this.bridge?.write(d));
-		this.startSession(false);
+		// resume → Kane picks his conversation back up across app restarts, exactly like the
+		// tiles (fresh fallback if no transcript). /clear inside the session starts a new one.
+		this.startSession(this.opts.resume ?? false, this.opts.resume ?? false);
 
 		this.resizeObs = new ResizeObserver(() => this.fitSoon());
 		this.resizeObs.observe(this.bodyEl);
@@ -196,6 +208,17 @@ export class GodConsole {
 		this.busy = true;
 		if (this.busyTimer !== null) window.clearTimeout(this.busyTimer);
 		this.busyTimer = window.setTimeout(() => { this.busy = false; this.busyTimer = null; }, 1500);
+	}
+
+	/** Re-tint the terminal well live (theme switch — see theme-store). Font weight and the
+	 *  contrast floor travel with the palette: light wells need both to read well. */
+	setTerminalPalette(p: TerminalPalette): void {
+		if (!this.term) return;
+		this.term.options.theme = p;
+		const f = activeTerminalFont();
+		this.term.options.fontWeight = f.fontWeight as never;
+		this.term.options.fontWeightBold = f.fontWeightBold as never;
+		this.term.options.minimumContrastRatio = f.minimumContrastRatio;
 	}
 
 	/** Refresh Kane: kill + relaunch with --continue in place, resuming his conversation.
@@ -244,7 +267,10 @@ export class GodConsole {
 	 *  them) — used to ping him when a watch fires. */
 	notify(text: string): void {
 		this.bridge?.write(text);
-		window.setTimeout(() => this.bridge?.write('\r'), 40);
+		// 250ms + a 900ms retry: match TerminalTile.sendLine — the new TUI's wider paste
+		// window eats a fast \r; the second Enter is a no-op on an already-submitted box.
+		window.setTimeout(() => this.bridge?.write('\r'), 250);
+		window.setTimeout(() => this.bridge?.write('\r'), 900);
 	}
 
 	/** Scroll this terminal's scrollback buffer per a keyboard scroll intent. */

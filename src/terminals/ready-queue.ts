@@ -1,19 +1,23 @@
-// Pure logic for the "ready" LIFO stack + input-box composing state. No DOM/IO.
+// Pure logic for the "ready" FIFO queue + input-box composing state. No DOM/IO.
 //
-// Behavior (matches the user's spec):
-// - A terminal that becomes ready (idle / waiting for you) is pushed on the stack
-//   and — unless you're actively typing — centered (it's the newest, the top).
-// - When you submit (Enter) to the centered terminal you've "finished with" it:
-//   it's popped and the next-newest ready terminal centers.
-// - You only HOLD the current center when there is text in your input box.
+// Behavior (2026-07-24 spec — first finished, first served):
+// - A terminal that becomes ready joins the BACK of the queue; the FRONT (waiting
+//   longest) is served first. Whether a fresh finisher may STEAL the center is the
+//   grid's call (event-driven, gated by an activity grace window) — this module only
+//   reports whether the tile is newly ready (`added`).
+// - Submitting (Enter) to a terminal finishes it: removed; the decider then serves
+//   the queue front.
+// - Clicking a tile pins it (manual override). Clicking AWAY from a centered ready
+//   tile demotes that tile to the back of the queue — it gave up its turn.
 
 export interface QueueState {
-	stack: number[];      // ready tile ids, LIFO (top = last element)
-	composingLen: number; // approx. number of chars in the focused terminal's input box
+	queue: number[];         // ready tile ids, FIFO (front = index 0 = waiting longest)
+	pinnedId: number | null; // manual click pin — held until you act or a steal replaces it
+	composingLen: number;    // approx. number of chars in the focused terminal's input box
 }
 
 export function emptyState(): QueueState {
-	return { stack: [], composingLen: 0 };
+	return { queue: [], pinnedId: null, composingLen: 0 };
 }
 
 /** Approximate the input-box length after a raw keystroke chunk from xterm. */
@@ -30,49 +34,36 @@ export function applyKeystroke(len: number, data: string): number {
 	return n;
 }
 
-const top = (stack: number[]): number | null => (stack.length ? stack[stack.length - 1]! : null);
-
-/** A tile became ready. Returns new state + which tile to center (null = hold/no change). */
-export function onReady(s: QueueState, id: number): { state: QueueState; center: number | null } {
-	const already = s.stack.includes(id);
-	const stack = already ? s.stack : [...s.stack, id];
-	// Already known-ready (an idle tile re-firing from cursor/redraw output) → do NOT re-center;
-	// this prevents idle tiles flickering the center back and forth. Actively typing → hold too.
-	if (already || s.composingLen > 0) return { state: { ...s, stack }, center: null };
-	return { state: { ...s, stack }, center: id };
+/** A tile became ready → back of the queue. `added` distinguishes a fresh finish
+ *  (a potential steal event) from an idle re-fire (never a steal). */
+export function onReady(s: QueueState, id: number): { state: QueueState; added: boolean } {
+	if (s.queue.includes(id)) return { state: s, added: false };
+	return { state: { ...s, queue: [...s.queue, id] }, added: true };
 }
 
-/** User submitted (Enter) to a tile — finished with it. Pop it; center the next-newest ready. */
-export function onSubmit(s: QueueState, id: number): { state: QueueState; center: number | null } {
-	const stack = s.stack.filter((x) => x !== id);
-	return { state: { stack, composingLen: 0 }, center: top(stack) };
+/** User submitted (Enter) to a tile — finished with it. Remove it; drop a matching pin. */
+export function onSubmit(s: QueueState, id: number): { state: QueueState } {
+	return { state: { queue: s.queue.filter((x) => x !== id), pinnedId: s.pinnedId === id ? null : s.pinnedId, composingLen: 0 } };
 }
 
-/** A tile closed. Drop it; if it was the centered one, center the next-newest ready. */
-export function onClose(s: QueueState, id: number, wasCentered: boolean): { state: QueueState; center: number | null } {
-	const stack = s.stack.filter((x) => x !== id);
-	return { state: { ...s, stack }, center: wasCentered ? top(stack) : null };
+/** A tile closed/hid. Remove it; drop a matching pin. */
+export function onClose(s: QueueState, id: number): { state: QueueState } {
+	return { state: { ...s, queue: s.queue.filter((x) => x !== id), pinnedId: s.pinnedId === id ? null : s.pinnedId } };
 }
 
-/** Manual click / Alt-key: move the tile to the top of the stack and center it.
- *  It stays until you submit to it, then the next-newest centers. */
-export function onClick(s: QueueState, id: number): { state: QueueState; center: number } {
-	const stack = [...s.stack.filter((x) => x !== id), id];
-	return { state: { ...s, stack }, center: id };
+/** User cycled past the last tile into the equal-grid overview: everything ready has
+ *  been SEEN. Clear the queue + pin so idle tiles stop attracting the spotlight; a
+ *  fresh finish re-queues via onReady, and prompts/errors break in regardless. */
+export function onOverview(s: QueueState): { state: QueueState } {
+	return { state: { ...s, queue: [], pinnedId: null } };
 }
 
-/** Alt+Right: send the current (top) to the back; the next one becomes top + centers. */
-export function cycleNext(s: QueueState): { state: QueueState; center: number | null } {
-	if (s.stack.length < 2) return { state: s, center: top(s.stack) };
-	const cur = s.stack[s.stack.length - 1]!;
-	const stack = [cur, ...s.stack.slice(0, -1)];
-	return { state: { ...s, stack }, center: top(stack) };
-}
-
-/** Alt+Left: reverse of cycleNext — bring the back one to the top + center it. */
-export function cyclePrev(s: QueueState): { state: QueueState; center: number | null } {
-	if (s.stack.length < 2) return { state: s, center: top(s.stack) };
-	const bot = s.stack[0]!;
-	const stack = [...s.stack.slice(1), bot];
-	return { state: { ...s, stack }, center: top(stack) };
+/** Manual click / Alt-key: pin the tile (it need not be ready). If a DIFFERENT ready
+ *  tile held the center (`displacedId`), it gave up its turn → back of the queue. */
+export function onClick(s: QueueState, id: number, displacedId?: number | null): { state: QueueState } {
+	let queue = s.queue;
+	if (displacedId != null && displacedId !== id && queue.includes(displacedId)) {
+		queue = [...queue.filter((x) => x !== displacedId), displacedId];
+	}
+	return { state: { ...s, queue, pinnedId: id } };
 }

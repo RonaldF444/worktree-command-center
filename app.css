@@ -185,7 +185,7 @@ html, body {
 .wcc-tab-add:hover { color: var(--text-normal); border-color: var(--text-muted); }
 
 /* 📱 Phone access panel. */
-.wcc-phone-panel { position: absolute; right: 12px; top: 46px; z-index: 1300; background: var(--background-secondary); border: 1px solid var(--background-modifier-border); border-radius: 10px; box-shadow: 0 12px 36px rgba(0,0,0,.55); padding: 12px 14px; max-width: 460px; }
+.wcc-phone-panel { position: fixed; right: 12px; z-index: 1300; background: var(--background-secondary); border: 1px solid var(--background-modifier-border); border-radius: 10px; box-shadow: 0 12px 36px rgba(0,0,0,.55); padding: 12px 14px; max-width: 460px; }
 .wcc-phone-h { font-weight: 600; margin-bottom: 4px; }
 .wcc-phone-sub { color: var(--text-muted); font-size: 12px; margin-bottom: 8px; }
 .wcc-phone-url { font-family: var(--font-monospace); font-size: 12.5px; color: var(--color-cyan); background: var(--background-primary); border: 1px solid var(--background-modifier-border); border-radius: 6px; padding: 6px 9px; margin-bottom: 6px; user-select: all; word-break: break-all; }
@@ -230,3 +230,219 @@ html, body {
 .cos-journal-convert-link { color: var(--interactive-accent); cursor: pointer; text-decoration: none; font-weight: 600; }
 .cos-journal-convert-link:hover { text-decoration: underline; }
 .cos-journal-preview-actions button:hover { border-color: var(--interactive-accent); }
+
+/* Shell slot: terminalRoot wraps the entire terminal surface, so an overlay can swap it
+   out as one unit (PrivateApi.shellHosts / hideTerminal). */
+.wcc-terminal-root { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+
+/* Theme switcher select in the top bar. */
+.wcc-topbar select.wcc-theme-sel {
+	background: var(--background-secondary-alt);
+	color: var(--text-normal);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 6px;
+	padding: 4px 8px;
+	font-size: 12px;
+}
+
+/* =============================================================
+ * Themes (see docs/superpowers/specs/2026-07-24-themes-design.md).
+ * Ported from Sargent: token remap first (everything re-tints),
+ * then a few personality rules per theme. 'default' has no block —
+ * it IS the :root palette above. Terminal interiors stay dark in
+ * every theme (Claude's TUI paints itself).
+ * ============================================================= */
+
+/* ---- OLYMPUS — brutalist daylight (yellow / ink / off-white) ---- */
+:root[data-theme="olympus"] {
+	--background-primary: #f4f2ea;
+	--background-primary-alt: #ede9dc;
+	--background-secondary: #ffffff;
+	--background-secondary-alt: #ffffff;
+	--background-modifier-border: #0b0b0b;
+	--background-modifier-border-hover: #0b0b0b;
+	--background-modifier-hover: rgba(255, 222, 46, 0.35);
+	--text-normal: #0b0b0b;
+	--text-muted: #333333;
+	--text-faint: #5a5a5a;
+	--text-on-accent: #0b0b0b;
+	--interactive-accent: #ffde2e;
+	--interactive-accent-hover: #e5c825;
+	--cos-accent: #2b5cff;
+	--cos-accent-hover: #2b5cff;
+	--color-green: #0caa4d;
+	--color-red: #ff3a2f;
+	--color-cyan: #2b5cff;
+	--color-yellow: #b8930a;
+}
+:root[data-theme="olympus"] .wcc-topbar {
+	background: #ffde2e !important;
+	border-bottom: 3px solid #0b0b0b;
+	font-family: 'JetBrains Mono', Consolas, monospace;
+}
+:root[data-theme="olympus"] .wcc-topbar button,
+:root[data-theme="olympus"] .wcc-grid-container button,
+:root[data-theme="olympus"] .wcc-topbar select.wcc-theme-sel,
+:root[data-theme="olympus"] .cos-terminals-controls select {
+	border: 2px solid #0b0b0b;
+	border-radius: 0;
+	box-shadow: 2px 2px 0 #0b0b0b;
+	font-weight: 700;
+}
+:root[data-theme="olympus"] .wcc-topbar button:hover,
+:root[data-theme="olympus"] .wcc-grid-container button:hover {
+	transform: translate(1px, 1px);
+	box-shadow: 1px 1px 0 #0b0b0b;
+}
+:root[data-theme="olympus"] .wcc-tab,
+:root[data-theme="olympus"] .wcc-tab-add {
+	border: 2px solid #0b0b0b;
+	border-radius: 0;
+	text-transform: uppercase;
+	font-weight: 700;
+	font-family: 'JetBrains Mono', Consolas, monospace;
+}
+:root[data-theme="olympus"] .wcc-tab.active { background: #ffde2e; color: #0b0b0b; }
+:root[data-theme="olympus"] .cos-terminals-stage .cos-term-tile {
+	background: #ffffff; /* tile bg shows wherever the (un-refit) xterm canvas doesn't cover — must match the well */
+	border: 2px solid #0b0b0b;
+	border-radius: 0;
+	box-shadow: 3px 3px 0 #0b0b0b;
+}
+:root[data-theme="olympus"] .cos-term-head {
+	background: #ffde2e;
+	color: #0b0b0b;
+	border-bottom: 2px solid #0b0b0b;
+	font-family: 'JetBrains Mono', Consolas, monospace;
+	font-weight: 700;
+}
+:root[data-theme="olympus"] .wcc-usage-pop,
+:root[data-theme="olympus"] .wcc-attn-menu,
+:root[data-theme="olympus"] .wcc-phone-panel {
+	border: 2px solid #0b0b0b;
+	border-radius: 0;
+	box-shadow: 5px 5px 0 #0b0b0b;
+}
+
+/* ---- HADES — navy / cyan / amber on brutalist bones ---- */
+:root[data-theme="hades"] {
+	--background-primary: #0a1929;
+	--background-primary-alt: #0d1f33;
+	--background-secondary: #0f2338;
+	--background-secondary-alt: #152d45;
+	--background-modifier-border: #1e3a5a;
+	--background-modifier-border-hover: #2c5179;
+	--background-modifier-hover: #152d45;
+	--text-normal: #d9e8f2;
+	--text-muted: #8aa5c2;
+	--text-faint: #5479a0;
+	--text-on-accent: #050e1a;
+	--interactive-accent: #71d4e8;
+	--interactive-accent-hover: #a6e8f5;
+	--cos-accent: #71d4e8;
+	--cos-accent-hover: #a6e8f5;
+	--color-green: #48b87a;
+	--color-red: #ff7070;
+	--color-cyan: #71d4e8;
+	--color-yellow: #f0b864;
+}
+:root[data-theme="hades"] .cos-terminals-stage {
+	background-image: radial-gradient(circle at 1px 1px, rgba(113, 212, 232, 0.08) 1px, transparent 1px);
+	background-size: 24px 24px;
+}
+:root[data-theme="hades"] .wcc-topbar {
+	background: #050e1a !important;
+	border-bottom: 3px solid #2c5179;
+	font-family: 'JetBrains Mono', Consolas, monospace;
+}
+:root[data-theme="hades"] .wcc-tab {
+	border: 2px solid #1e3a5a;
+	border-radius: 0;
+	text-transform: uppercase;
+	font-weight: 700;
+	font-family: 'JetBrains Mono', Consolas, monospace;
+}
+:root[data-theme="hades"] .wcc-tab.active { border-color: #71d4e8; color: #71d4e8; }
+:root[data-theme="hades"] .cos-terminals-stage .cos-term-tile {
+	border: 2px solid #2c5179;
+	border-radius: 0;
+	box-shadow: 3px 3px 0 #050e1a;
+}
+:root[data-theme="hades"] .cos-term-head {
+	background: #050e1a;
+	color: #71d4e8;
+	border-bottom: 2px solid #71d4e8;
+	font-family: 'JetBrains Mono', Consolas, monospace;
+	font-weight: 700;
+}
+
+/* Olympus terminals are paper (white wells, black text — see theme-store palettes);
+   the journal textarea has a hardcoded dark well, so re-paper it too. */
+:root[data-theme="olympus"] .cos-journal-text {
+	background: #ffffff;
+	color: #0b0b0b;
+}
+:root[data-theme="olympus"] .cos-god-panel { background: #ffffff; }
+:root[data-theme="iris"] .cos-god-panel { background: #f7f2ff; }
+:root[data-theme="iris"] .cos-journal-text {
+	background: #f7f2ff;
+	color: #3b1d66;
+}
+
+/* ---- IRIS — vibrant violet night with neon magenta / cyan / gold ---- */
+:root[data-theme="iris"] {
+	--background-primary: #170b2a;
+	--background-primary-alt: #1d0f33;
+	--background-secondary: #221240;
+	--background-secondary-alt: #2c1852;
+	--background-modifier-border: #4a2b8a;
+	--background-modifier-border-hover: #6d3fd1;
+	--background-modifier-hover: #2c1852;
+	--text-normal: #f2e9ff;
+	--text-muted: #b79ae0;
+	--text-faint: #8465b3;
+	--text-on-accent: #14081f;
+	--interactive-accent: #ff4fd8;
+	--interactive-accent-hover: #ff7ae4;
+	--cos-accent: #24d3ff;
+	--cos-accent-hover: #6fe3ff;
+	--color-green: #21e6c1;
+	--color-red: #ff5c7a;
+	--color-cyan: #24d3ff;
+	--color-yellow: #ffd166;
+}
+:root[data-theme="iris"] .wcc-topbar {
+	background: linear-gradient(90deg, #2b0f54, #4a1580) !important;
+	border-bottom: 2px solid #ff4fd8;
+}
+:root[data-theme="iris"] .wcc-tab.active {
+	color: #ff4fd8;
+	border-color: #ff4fd8;
+	box-shadow: 0 0 10px rgba(255, 79, 216, 0.35);
+}
+:root[data-theme="iris"] .cos-terminals-stage {
+	background-image: radial-gradient(circle at 1px 1px, rgba(36, 211, 255, 0.09) 1px, transparent 1px);
+	background-size: 26px 26px;
+}
+:root[data-theme="iris"] .cos-terminals-stage .cos-term-tile {
+	background: #f7f2ff; /* match the well — see the olympus note */
+	border: 1px solid #4a2b8a;
+	border-radius: 8px;
+	overflow: hidden;
+	box-shadow: 0 0 14px rgba(255, 79, 216, 0.22);
+}
+:root[data-theme="iris"] .cos-terminals-stage .cos-term-tile.centered {
+	border-color: #ff4fd8;
+	box-shadow: 0 0 20px rgba(255, 79, 216, 0.4);
+}
+:root[data-theme="iris"] .cos-term-head {
+	background: #221240;
+	color: #24d3ff;
+	border-bottom: 1px solid #6d3fd1;
+}
+:root[data-theme="iris"] .wcc-usage-pop,
+:root[data-theme="iris"] .wcc-attn-menu,
+:root[data-theme="iris"] .wcc-phone-panel {
+	border: 1px solid #6d3fd1;
+	box-shadow: 0 8px 28px rgba(0, 0, 0, 0.6), 0 0 18px rgba(255, 79, 216, 0.25);
+}

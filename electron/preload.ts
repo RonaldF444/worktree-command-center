@@ -14,8 +14,12 @@ import { ipcRenderer } from 'electron';
 	// focus/permission — this path works identically in dev and packaged builds.
 	clipboardRead: () => ipcRenderer.invoke('clipboard:read'),
 	clipboardWrite: (text: string) => ipcRenderer.invoke('clipboard:write', text),
+	// Deterministic command execution in the MAIN process (see command-runner.ts).
+	runCommand: (command: string, args: string[], opts?: object) => ipcRenderer.invoke('cmd:run', command, args, opts),
 	// Phone floor view bridge.
 	pushFloorState: (s: unknown) => ipcRenderer.send('remote:state', s),
 	onRemoteAction: (cb: (a: unknown) => void) => ipcRenderer.on('remote:action', (_e, a) => cb(a)),
 	remoteInfo: () => ipcRenderer.invoke('remote:info'),
+	// Shell digit shortcuts (Ctrl+digit, intercepted in main).
+	onShellDigit: (cb: (n: number) => void) => ipcRenderer.on('shell:digit', (_e, n) => cb(n)),
 };

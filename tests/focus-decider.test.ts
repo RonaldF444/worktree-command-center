@@ -10,9 +10,9 @@ describe('decideOnReady', () => {
 	});
 });
 
-describe('decideCenter — spotlight follows whoever needs you, never a thinking tile', () => {
+describe('decideCenter — FIFO service with a held center (2026-07-24 spec)', () => {
 	const ctx = (over: Partial<CenterContext>): CenterContext => ({
-		tiles: [], centeredId: null, readyOrder: [], userTyping: false, globalLock: false, lockedTileId: null, ...over,
+		tiles: [], centeredId: null, readyOrder: [], pinnedId: null, userTyping: false, globalLock: false, lockedTileId: null, ...over,
 	});
 
 	it('no tiles → no spotlight', () => {
@@ -20,7 +20,6 @@ describe('decideCenter — spotlight follows whoever needs you, never a thinking
 	});
 
 	it('everyone thinking (and none pinned) → no spotlight, equal grid', () => {
-		// The reported bug #2: all thinking should drop the spotlight, not keep one enlarged.
 		expect(decideCenter(ctx({
 			tiles: [{ id: 1, state: 'thinking' }, { id: 2, state: 'thinking' }],
 			centeredId: 1,
@@ -31,15 +30,33 @@ describe('decideCenter — spotlight follows whoever needs you, never a thinking
 		expect(decideCenter(ctx({ tiles: [{ id: 1, state: 'idle' }], readyOrder: [1] }))).toBe(1);
 	});
 
-	it('moves off a thinking centered tile to an idle sibling', () => {
-		// The reported bug #1: focus is stuck on a thinking tile while a sibling is idle.
+	it('moves off a thinking centered tile to a ready sibling', () => {
 		expect(decideCenter(ctx({
 			tiles: [{ id: 1, state: 'thinking' }, { id: 2, state: 'idle' }],
 			readyOrder: [2], centeredId: 1,
 		}))).toBe(2);
 	});
 
-	it('a permission prompt outranks a plain idle tile', () => {
+	it('serves the FRONT of the queue (waiting longest) when the center is free', () => {
+		expect(decideCenter(ctx({
+			tiles: [{ id: 1, state: 'idle' }, { id: 2, state: 'idle' }, { id: 3, state: 'thinking' }],
+			readyOrder: [1, 2], centeredId: 3,
+		}))).toBe(1);
+	});
+
+	it('HOLDS a centered ready tile against same-tier siblings — FIFO advances on YOUR action', () => {
+		// (Old LIFO behavior yanked the center to the newest finisher; steal is event-driven now.)
+		expect(decideCenter(ctx({
+			tiles: [{ id: 1, state: 'idle' }, { id: 2, state: 'idle' }],
+			readyOrder: [1, 2], centeredId: 1,
+		}))).toBe(1);
+		expect(decideCenter(ctx({
+			tiles: [{ id: 1, state: 'idle' }, { id: 2, state: 'idle' }],
+			readyOrder: [1, 2], centeredId: 2,
+		}))).toBe(2);
+	});
+
+	it('a permission prompt still outranks a held idle center (urgency beats FIFO)', () => {
 		expect(decideCenter(ctx({
 			tiles: [{ id: 1, state: 'idle' }, { id: 2, state: 'prompt' }],
 			readyOrder: [1], centeredId: 1,
@@ -53,19 +70,45 @@ describe('decideCenter — spotlight follows whoever needs you, never a thinking
 		}))).toBe(2);
 	});
 
-	it('among idle tiles the newest-ready wins (LIFO recency)', () => {
+	it('queued tiles are served before attention-needing tiles that never became ready', () => {
 		expect(decideCenter(ctx({
-			tiles: [{ id: 1, state: 'idle' }, { id: 2, state: 'idle' }],
-			readyOrder: [1, 2], centeredId: 1,
+			tiles: [{ id: 4, state: 'idle' }, { id: 1, state: 'idle' }],
+			readyOrder: [1], centeredId: null,
+		}))).toBe(1);
+	});
+
+	it('dismissed idle tiles (not in the queue) never attract the spotlight — overview holds', () => {
+		// The 2026-07-27 bug: Alt+Right past the last tile reached the equal grid, then the
+		// 1s re-derive bounced the center back to tile 1. All-idle + empty queue must stay null.
+		expect(decideCenter(ctx({
+			tiles: [{ id: 1, state: 'idle' }, { id: 2, state: 'idle' }, { id: 3, state: 'idle' }],
+			readyOrder: [], centeredId: null,
+		}))).toBeNull();
+	});
+
+	it('a prompt or error still breaks into the overview even off-queue', () => {
+		expect(decideCenter(ctx({
+			tiles: [{ id: 1, state: 'idle' }, { id: 2, state: 'prompt' }],
+			readyOrder: [], centeredId: null,
+		}))).toBe(2);
+		expect(decideCenter(ctx({
+			tiles: [{ id: 1, state: 'idle' }, { id: 3, state: 'errored' }],
+			readyOrder: [], centeredId: null,
+		}))).toBe(3);
+	});
+
+	it('a manual pin keeps a thinking tile centered over queued ready tiles', () => {
+		expect(decideCenter(ctx({
+			tiles: [{ id: 1, state: 'idle' }, { id: 2, state: 'thinking' }],
+			readyOrder: [1], pinnedId: 2, centeredId: 2,
 		}))).toBe(2);
 	});
 
-	it('a manually-pinned (on-stack) thinking tile keeps the center over an older idle', () => {
-		// Clicking a thinking tile puts it on top of the ready stack; idle re-fires must not steal it.
+	it('a stale pin (tile gone) is ignored', () => {
 		expect(decideCenter(ctx({
-			tiles: [{ id: 1, state: 'idle' }, { id: 2, state: 'thinking' }],
-			readyOrder: [1, 2], centeredId: 2,
-		}))).toBe(2);
+			tiles: [{ id: 1, state: 'idle' }],
+			readyOrder: [1], pinnedId: 99, centeredId: null,
+		}))).toBe(1);
 	});
 
 	it('an individual lock pins the spotlight regardless of state', () => {
