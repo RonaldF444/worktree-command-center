@@ -10,6 +10,7 @@ import { removeWorktreeAndBranch, terminalSystemPrompt, worktreeSettingsPath, ty
 import { scrollIntentForKey, type ScrollIntent } from './scroll-keys';
 import { FitThrottle } from './fit-throttle';
 import { HiddenOutputBuffer } from './hidden-buffer';
+import { isUserInput } from './ready-queue';
 import { activeTerminalPalette, activeTerminalFont, type TerminalPalette } from './theme-store';
 import { ctrlClickActivator, openExternalUrl } from './links';
 import { promptForConfirm } from '../ui/prompt-dialog';
@@ -196,8 +197,13 @@ export class TerminalTile implements StageTile {
 		this.fitSoon();
 
 		this.term.onData((d) => {
-			this.bridge?.write(d);
+			this.bridge?.write(d); // always forwarded — Claude asked for these reports
 			if (this.pasting) return; // pasted content (incl. its newlines) is NOT a submit
+			// Only a HUMAN keystroke means "this session is being worked on". xterm answers
+			// Claude's focus reporting (DECSET 1004) on the same channel, so the focus/blur
+			// WE cause by centering a tile would otherwise clear its idle flag and bounce the
+			// spotlight to the next tile — forever, with nobody at the keyboard (2026-07-28).
+			if (!isUserInput(d)) return;
 			if (d.includes('\r')) { this.idle = false; this.opts.onEnter?.(this); }
 			else this.opts.onInput?.(this, d);
 		});

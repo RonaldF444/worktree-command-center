@@ -20,6 +20,31 @@ export function emptyState(): QueueState {
 	return { queue: [], pinnedId: null, composingLen: 0 };
 }
 
+/** Did a HUMAN produce this raw xterm `onData` chunk, or is it the terminal answering the
+ *  application on its own?
+ *
+ *  Claude Code turns on focus reporting (DECSET 1004) during startup, so xterm reports every
+ *  focus and blur back through the SAME channel as typing — including the focus changes the
+ *  grid itself causes when it centers a tile. Counting those as input cleared the tile's idle
+ *  flag, so a finished terminal read as `thinking`, lost its hold on the center, and the
+ *  spotlight moved — which focused the next tile, which reported ITS focus, and so on: the
+ *  floor bounced from tile to tile with nobody at the keyboard (2026-07-28). Mouse and
+ *  status/capability replies ride the same channel and are excluded for the same reason.
+ *
+ *  Keys that legitimately arrive as escape sequences (arrows, F-keys, a bare Escape) ARE
+ *  input — navigating a menu must still count as the user being engaged. */
+export function isUserInput(data: string): boolean {
+	if (!data) return false;
+	if (data === '\x1b[I' || data === '\x1b[O') return false;      // focus in / focus out report
+	if (data.startsWith('\x1b[M')) return false;                   // X10 mouse report
+	if (/^\x1b\[<\d+;\d+;\d+[Mm]/.test(data)) return false;        // SGR mouse report
+	if (/^\x1b\[\d+;\d+R$/.test(data)) return false;               // cursor position (DSR) reply
+	if (/^\x1b\[[?>][\d;]*c$/.test(data)) return false;            // device attributes reply
+	if (data.startsWith('\x1b]')) return false;                    // OSC reply (colour queries, …)
+	if (data.startsWith('\x1bP')) return false;                    // DCS reply (DECRQSS, XTGETTCAP)
+	return true;
+}
+
 /** Approximate the input-box length after a raw keystroke chunk from xterm. */
 export function applyKeystroke(len: number, data: string): number {
 	if (data === '\x1b') return 0;                            // bare Escape: cancels/clears the box

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { emptyState, applyKeystroke, onReady, onSubmit, onClose, onClick, onOverview } from '../src/terminals/ready-queue';
+import { emptyState, applyKeystroke, isUserInput, onReady, onSubmit, onClose, onClick, onOverview } from '../src/terminals/ready-queue';
 
 describe('applyKeystroke (input-box length)', () => {
 	it('counts printable chars', () => {
@@ -21,6 +21,39 @@ describe('applyKeystroke (input-box length)', () => {
 	});
 	it('a bare Escape clears the box (Claude cancel / clear)', () => {
 		expect(applyKeystroke(5, '\x1b')).toBe(0);
+	});
+});
+
+describe('isUserInput (typing vs. the terminal answering the app)', () => {
+	it('a focus report is NOT user input — centering a tile makes xterm send these', () => {
+		// Claude Code turns on focus reporting (DECSET 1004) at startup, so every focus/blur
+		// WE cause by centering a tile comes back through onData. Counting it as typing
+		// cleared the tile's idle flag and sent the spotlight bouncing (2026-07-28).
+		expect(isUserInput('\x1b[I')).toBe(false); // focus in
+		expect(isUserInput('\x1b[O')).toBe(false); // focus out
+	});
+	it('mouse reports are not user input', () => {
+		expect(isUserInput('\x1b[M !!')).toBe(false);      // X10
+		expect(isUserInput('\x1b[<0;12;34M')).toBe(false); // SGR press
+		expect(isUserInput('\x1b[<0;12;34m')).toBe(false); // SGR release
+	});
+	it('status/capability replies are not user input', () => {
+		expect(isUserInput('\x1b[24;80R')).toBe(false);        // cursor position (DSR)
+		expect(isUserInput('\x1b[?62;c')).toBe(false);         // primary device attributes
+		expect(isUserInput('\x1b]10;rgb:ff/ff/ff\x1b\\')).toBe(false); // OSC colour query
+		expect(isUserInput('\x1bP1$r0m\x1b\\')).toBe(false);   // DCS (DECRQSS)
+		expect(isUserInput('')).toBe(false);
+	});
+	it('real typing IS user input — including keys that arrive as escape sequences', () => {
+		expect(isUserInput('a')).toBe(true);
+		expect(isUserInput('\r')).toBe(true);
+		expect(isUserInput('\x7f')).toBe(true);        // backspace
+		expect(isUserInput('\x1b')).toBe(true);        // bare Escape
+		expect(isUserInput('\x1b[A')).toBe(true);      // arrow up (menu navigation)
+		expect(isUserInput('\x1b[B')).toBe(true);
+		expect(isUserInput('\x1b[Z')).toBe(true);      // shift-tab
+		expect(isUserInput('\x1bOP')).toBe(true);      // F1
+		expect(isUserInput('\x1b[200~hi\x1b[201~')).toBe(true); // bracketed paste
 	});
 });
 
