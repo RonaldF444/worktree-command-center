@@ -1155,8 +1155,29 @@ export class TerminalsGrid {
 		try { return JSON.parse(await fs.readFile(this.sessionsFile, 'utf8')) as Record<string, SessionRecord[]>; } catch { return {}; }
 	}
 
+	/** Records that could not be reopened at launch (worktree path unreachable, or the
+	 *  restore of that one record threw). They stay in the sessions file and retry on the
+	 *  next launch — a transiently unavailable path (moved repo, unmounted drive, slow
+	 *  OneDrive) must never DELETE session history. */
+	private unrestored: SessionRecord[] = [];
+
+	/** All persists in this renderer — every grid — go through ONE chain. Concurrent
+	 *  fire-and-forget persists used to race on the shared file, and a STALE snapshot
+	 *  could land last: toggleGod()'s persist fires mid-restore, before the hidden tiles
+	 *  exist, and when its write finished after the final restore persist it rewrote the
+	 *  group as just [god] — which is how CARDTSAR lost every terminal record
+	 *  (2026-07-30). Chaining serializes the read-modify-write AND defers the state
+	 *  snapshot to write time, so the last queued persist wins with the newest state. */
+	private static persistChain: Promise<void> = Promise.resolve();
+
 	/** Persist THIS group's currently-open sessions (called on play + on close). */
-	private async persist(): Promise<void> {
+	private persist(): Promise<void> {
+		const run = TerminalsGrid.persistChain.then(() => this.persistNow()).catch(() => { /* best effort */ });
+		TerminalsGrid.persistChain = run;
+		return run;
+	}
+
+	private async persistNow(): Promise<void> {
 		const all = await this.readAllSessions();
 		const serializeTile = (t: StageTile, hidden: boolean): SessionRecord => {
 			if (t.isJournal) {
@@ -1164,9 +1185,14 @@ export class TerminalsGrid {
 			}
 			return { kind: 'terminal', ...(t as TerminalTile).sessionRecord(), hidden };
 		};
+		// Retained unrestored records — minus any worktree the user has since reopened
+		// as a live tile (the live tile's record supersedes the stale one).
+		const liveWts = new Set([...this.tiles, ...this.hidden].filter((t) => !t.isJournal).map((t) => (t as TerminalTile).worktreePath));
+		const retained = this.unrestored.filter((r) => r.kind === 'journal' || r.kind === 'god' || !liveWts.has(r.worktreePath));
 		all[this.deps.group] = [
 			...this.tiles.map((t) => serializeTile(t, false)),
 			...this.hidden.map((t) => serializeTile(t, true)),
+			...retained,
 			// Kane persists like the tiles (2026-07-24): once opened he comes back on the next
 			// launch, resumed with --continue. /clear inside his session is the fresh-start path.
 			...(this.godConsole ? [{ kind: 'god', worktreePath: '', branch: '', repoName: 'god', repoPath: '', baseBranch: '' } as SessionRecord] : []),
@@ -1180,9 +1206,26 @@ export class TerminalsGrid {
 		const recs = all[this.deps.group] ?? [];
 		const { visible, hidden } = partitionByHidden(recs);
 		for (const rec of [...visible, ...hidden]) {
+			try {
+				await this.restoreRecord(rec);
+			} catch (e) {
+				// One bad record must not abort the loop — the remaining records still
+				// restore, and the healing persist below still runs. Keep the failed
+				// record for the next launch instead of losing it.
+				this.unrestored.push(rec);
+				console.warn('[grid] session restore failed for record, retained', rec.worktreePath || rec.kind, e);
+			}
+		}
+		await this.persist(); // heal the file: live tiles + retained unrestored records
+		this.applyLayout();
+	}
+
+	/** Restore ONE persisted record into a live tile/console. Throws → caller retains it. */
+	private async restoreRecord(rec: SessionRecord): Promise<void> {
+		{
 			if (rec.kind === 'god') {
 				if (!this.godConsole) this.toggleGod(); // opens + resumes (resume: true in toggleGod)
-				continue;
+				return;
 			}
 			if (rec.kind === 'journal') {
 				const doc = rec.journalSlug ? this.journalStore.load(rec.journalSlug) : null;
@@ -1206,18 +1249,16 @@ export class TerminalsGrid {
 				});
 				if (this.stageEl) tile.render(this.stageEl);
 				if (rec.hidden) { tile.setHidden(true); this.hidden.push(tile); } else { this.tiles.push(tile); }
-				continue; // skip the terminal path for this record
+				return; // skip the terminal path for this record
 			}
 			let exists = false;
 			try { await fs.access(rec.worktreePath); exists = true; } catch { exists = false; }
-			if (!exists) continue;
+			if (!exists) { this.unrestored.push(rec); return; } // retained — retried next launch
 			const tile = this.makeTile({ worktreePath: rec.worktreePath, branch: rec.branch }, rec.repoName, rec.repoPath, rec.baseBranch, true, rec.name, rec.model, rec.effort);
 			if (this.stageEl) tile.render(this.stageEl);
 			if (rec.hidden) { tile.setHidden(true); this.hidden.push(tile); }
 			else this.tiles.push(tile);
 		}
-		await this.persist(); // prune records whose worktree no longer exists
-		this.applyLayout();
 	}
 
 	/** Full teardown (view close): unmount + kill all sessions. */
