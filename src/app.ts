@@ -29,7 +29,7 @@ declare global {
 			addFolder(): Promise<string | null>;
 			pushFloorState(s: unknown): void;
 			onRemoteAction(cb: (a: { type: string; id?: number; repo?: string; base?: string | null; task?: string; text?: string }) => void): void;
-			remoteInfo(): Promise<{ token: string; port: number; urls: string[] }>;
+			remoteInfo(): Promise<{ token: string; port: number; urls: string[]; httpsUrl: string | null }>;
 			onShellDigit(cb: (n: number) => void): void;
 		};
 	}
@@ -283,6 +283,12 @@ async function main(): Promise<void> {
 				const btnRect = phoneBtn.getBoundingClientRect();
 				phonePanel.style.top = `${Math.round(btnRect.bottom + 6)}px`;
 				phonePanel.createDiv({ cls: 'wcc-phone-h', text: '📱 Phone floor view' });
+				if (info.httpsUrl) {
+					phonePanel.createDiv({ cls: 'wcc-phone-sub', text: '🎤 Voice-capable (HTTPS) — open this one to talk:' });
+					phonePanel.createEl('div', { cls: 'wcc-phone-url', text: info.httpsUrl });
+				} else {
+					phonePanel.createDiv({ cls: 'wcc-phone-sub', text: 'For voice, run once:  tailscale serve --bg 7420' });
+				}
 				phonePanel.createDiv({ cls: 'wcc-phone-sub', text: 'Open one of these on your phone (same Tailscale network):' });
 				for (const u of info.urls) phonePanel.createEl('div', { cls: 'wcc-phone-url', text: u });
 				const close = phonePanel.createEl('button', { cls: 'wcc-phone-close', text: 'Close' });

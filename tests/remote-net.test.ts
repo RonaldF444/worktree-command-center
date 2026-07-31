@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isTailscaleIp, pickHosts, accessUrls } from '../electron/remote-net';
+import { isTailscaleIp, pickHosts, accessUrls, httpsUrlFor } from '../electron/remote-net';
 
 describe('isTailscaleIp', () => {
   it('detects the 100.64.0.0/10 range', () => {
@@ -31,5 +31,19 @@ describe('accessUrls', () => {
       'http://100.92.3.4:7420/?t=abcd',
       'http://mybox:7420/?t=abcd',
     ]);
+  });
+});
+
+describe('httpsUrlFor', () => {
+  it('builds the URL and strips the MagicDNS trailing dot', () => {
+    expect(httpsUrlFor('desk.tail1234.ts.net.', 'abc123')).toBe('https://desk.tail1234.ts.net/?t=abc123');
+  });
+  it('works without a trailing dot', () => {
+    expect(httpsUrlFor('desk.tail1234.ts.net', 'abc123')).toBe('https://desk.tail1234.ts.net/?t=abc123');
+  });
+  it('returns null when there is no name — voice is simply unavailable', () => {
+    expect(httpsUrlFor(null, 'abc123')).toBeNull();
+    expect(httpsUrlFor(undefined, 'abc123')).toBeNull();
+    expect(httpsUrlFor('   ', 'abc123')).toBeNull();
   });
 });

@@ -24,3 +24,12 @@ export function pickHosts(ifaces: Record<string, NetworkInterfaceInfo[] | undefi
 export function accessUrls(hosts: string[], port: number, token: string): string[] {
 	return hosts.map((h) => `http://${h}:${port}/?t=${token}`);
 }
+
+/** The HTTPS URL for the phone page when `tailscale serve` is fronting us, else null.
+ *  Voice needs a secure context: Safari will not hand a microphone to an http:// page, so
+ *  the plain-HTTP URLs above are read-only in practice. MagicDNS names arrive fully
+ *  qualified with a trailing dot, which is legal in DNS but ugly in a URL. */
+export function httpsUrlFor(dnsName: string | null | undefined, token: string): string | null {
+	const host = (dnsName ?? '').trim().replace(/\.$/, '');
+	return host ? `https://${host}/?t=${token}` : null;
+}

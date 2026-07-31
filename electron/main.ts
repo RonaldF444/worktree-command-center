@@ -2,8 +2,9 @@ import { app, BrowserWindow, ipcMain, dialog, clipboard, shell } from 'electron'
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
+import { execFileSync } from 'child_process';
 import { startRemoteServer } from './remote-server';
-import { pickHosts, accessUrls } from './remote-net';
+import { pickHosts, accessUrls, httpsUrlFor } from './remote-net';
 import { Worker } from 'worker_threads';
 
 const REMOTE_PORT = 7420;
@@ -20,6 +21,18 @@ app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion');
 // protocol on localhost only, so a CPU profile of the renderer can be captured from
 // outside while the lag is reproducing. Loopback-bound — not reachable off-machine.
 app.commandLine.appendSwitch('remote-debugging-port', '9223');
+
+/** This machine's MagicDNS name, for the HTTPS (voice-capable) phone URL. Best-effort: no
+ *  Tailscale installed, not logged in, or a daemon still starting all yield null and the
+ *  panel falls back to the setup hint. Read on each panel open rather than once at startup,
+ *  because Tailscale often finishes starting after WCC does. */
+function tailscaleDnsName(): string | null {
+	try {
+		const out = execFileSync('tailscale', ['status', '--json'], { timeout: 2000, encoding: 'utf8', windowsHide: true });
+		const name = (JSON.parse(out) as { Self?: { DNSName?: string } }).Self?.DNSName;
+		return typeof name === 'string' && name.trim() ? name : null;
+	} catch { return null; }
+}
 
 function createWindow(): void {
 	const sidecarDir = app.isPackaged
@@ -103,6 +116,7 @@ function createWindow(): void {
 		token,
 		port: REMOTE_PORT,
 		urls: accessUrls(pickHosts(os.networkInterfaces(), os.hostname()), REMOTE_PORT, token),
+		httpsUrl: httpsUrlFor(tailscaleDnsName(), token),
 	}));
 }
 
