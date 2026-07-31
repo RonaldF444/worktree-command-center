@@ -28,7 +28,7 @@ declare global {
 			setConfig(c: any): Promise<boolean>;
 			addFolder(): Promise<string | null>;
 			pushFloorState(s: unknown): void;
-			onRemoteAction(cb: (a: { type: string; id?: number; repo?: string; base?: string | null; task?: string }) => void): void;
+			onRemoteAction(cb: (a: { type: string; id?: number; repo?: string; base?: string | null; task?: string; text?: string }) => void): void;
 			remoteInfo(): Promise<{ token: string; port: number; urls: string[] }>;
 			onShellDigit(cb: (n: number) => void): void;
 		};
@@ -271,6 +271,7 @@ async function main(): Promise<void> {
 		window.wcc.onRemoteAction((a) => {
 			if (a.type === 'remote' && typeof a.id === 'number') activeGrid.toggleRemoteById(a.id);
 			else if (a.type === 'spawn' && a.repo && a.task) void activeGrid.spawnFromName(a.repo, a.base ?? null, a.task);
+			else if (a.type === 'input' && typeof a.id === 'number' && a.text) activeGrid.sendToId(a.id, a.text);
 		});
 
 		// 📱 Phone button → panel with the Tailscale URLs to open on your phone.

@@ -630,6 +630,16 @@ export class TerminalsGrid {
 		if (t && !t.isJournal) (t as TerminalTile).toggleRemoteControl();
 	}
 
+	/** Phone: type a line into a terminal. Goes through the tile's own sendLine, which writes
+	 *  the text and the Enter on SEPARATE ticks — bundling "text\r" into one PTY write makes
+	 *  Claude treat the newline as pasted, so the message lands in the box unsent. A tile that
+	 *  closed since the phone's last poll is silently ignored. */
+	sendToId(id: number, text: string): void {
+		const tile = [...this.tiles, ...this.hidden].find((t) => t.tileId === id);
+		if (!tile || tile.isJournal) return;
+		(tile as TerminalTile).sendLine(text);
+	}
+
 	/** Spawn a worktree terminal for a repo by name, on a base, with a kickoff task. Model/effort
 	 *  override the toolbar dropdowns when given (spawnWorktree applies the fallback); name
 	 *  overrides the default branch-derived terminal name. */
