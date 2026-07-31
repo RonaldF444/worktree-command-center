@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'http';
 import { randomBytes } from 'crypto';
 import { ipcMain, type BrowserWindow } from 'electron';
+import { parseRemoteAction } from './remote-actions';
 
 export interface RemoteServerOpts { port: number; getWindow: () => BrowserWindow | null; }
 
@@ -33,8 +34,12 @@ export function startRemoteServer(opts: RemoteServerOpts): { token: string } {
 				let body = '';
 				req.on('data', (c) => { body += c; if (body.length > 1e5) req.destroy(); });
 				req.on('end', () => {
-					try { opts.getWindow()?.webContents.send('remote:action', JSON.parse(body)); json(res, 200, { ok: true }); }
-					catch { json(res, 400, { error: 'bad body' }); }
+					try {
+						const action = parseRemoteAction(JSON.parse(body));
+						if (!action) { json(res, 400, { error: 'bad action' }); return; }
+						opts.getWindow()?.webContents.send('remote:action', action);
+						json(res, 200, { ok: true });
+					} catch { json(res, 400, { error: 'bad body' }); }
 				});
 				return;
 			}
@@ -76,7 +81,7 @@ pre{margin:0;padding:8px 12px;font-size:11.5px;color:#9fb8a8;white-space:pre-wra
 <input id="base" placeholder="base branch (blank = main)"/>
 <textarea id="task" rows="2" placeholder="kickoff task…"></textarea>
 <button onclick="spawn()">Spawn</button></div>
-<div class="note">Tap “Remote control” on a terminal, then open it in the Claude app. Read-only otherwise.</div>
+<div class="note">Tap "Remote control" on a terminal, then open it in the Claude app. Read-only otherwise.</div>
 <script>
 var T=new URLSearchParams(location.search).get('t');
 function post(a){return fetch('/api/action?t='+T,{method:'POST',body:JSON.stringify(a)});}
