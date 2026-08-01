@@ -135,6 +135,10 @@ var repoFilled=false;
 // still writing, into a detached <input> nobody sees). That is why poll() only calls this when
 // anyOpen() is false, and why talk() — which itself changes what #list must contain — is the
 // only other legitimate caller. Do not add a new call site without the same guard.
+// id thresholds below: real tiles are >=0; Kane is the single synthetic id -1 (must match
+// KANE_ID in electron/remote-actions.ts and TerminalsGrid.floorState). Kane gets the talk
+// button + compose row (>=-1) but never the remote-control button (>=0 only) — he has no
+// Claude-remote-control toggle.
 function render(d){
   if(!repoFilled&&(d.repos||[]).length){var s=document.getElementById('repo');s.innerHTML=d.repos.map(function(r){return '<option>'+esc(r)+'</option>';}).join('');repoFilled=true;}
   document.getElementById('list').innerHTML=(d.terminals||[]).map(function(t){
@@ -144,8 +148,8 @@ function render(d){
       '<span class="badge s-'+esc(t.state)+'">'+esc(t.state)+'</span></div>'+
       '<pre>'+esc(t.output||'')+'</pre>'+
       (t.id>=0?'<button class="rc'+(t.remoteOn?' on':'')+'" onclick="rc('+t.id+')">'+(t.remoteOn?'📱 remote on — tap to turn off':'📱 Remote control')+'</button>':'')+
-      (t.id>=0?'<button class="talk" onclick="talk('+t.id+')">'+(OPEN[t.id]?'▾ close':'💬 Talk to this terminal')+'</button>':'')+
-      (t.id>=0&&OPEN[t.id]?'<div class="row"><input id="f'+t.id+'" value="'+esc(DRAFT[t.id]||'')+'" oninput="draft('+t.id+')" placeholder="'+(CAN_MIC?'hold the mic, or type':'type — or use the keyboard mic')+'"/>'+
+      (t.id>=-1?'<button class="talk" onclick="talk('+t.id+')">'+(OPEN[t.id]?'▾ close':'💬 Talk to this terminal')+'</button>':'')+
+      (t.id>=-1&&OPEN[t.id]?'<div class="row"><input id="f'+t.id+'" value="'+esc(DRAFT[t.id]||'')+'" oninput="draft('+t.id+')" placeholder="'+(CAN_MIC?'hold the mic, or type':'type — or use the keyboard mic')+'"/>'+
         (CAN_MIC?'<button class="mic" id="m'+t.id+'" onpointerdown="micDown('+t.id+')" onpointerup="micUp('+t.id+')" onpointercancel="micUp('+t.id+')">🎤</button>':'')+
         '<button onclick="send('+t.id+')">Send</button></div><div class="err" id="e'+t.id+'"></div>':'')+
     '</div>';

@@ -25,6 +25,7 @@ import { JournalStore } from './journal-store';
 import { FormatProbe } from './format-probe';
 import { LinearConvertProbe, type LinearConvertConfig } from './linear-convert-probe';
 import type { StageTile } from './stage-tile';
+import { KANE_ID } from '../../electron/remote-actions';
 
 export interface RepoConfig { name: string; path: string; remote?: string; group?: string; }
 export interface RemoteTerminal { id: number; name: string; repo: string; branch: string; state: string; output: string; remoteOn: boolean; }
@@ -77,6 +78,13 @@ const KANE_PERSONA_OFF =
 	'[personality: OFF] Drop the forge-master voice — back to your plain, neutral overseer tone. ' +
 	'The "[pulse]" nudges have stopped; ignore any you still see. Acknowledge in one short line.';
 const KANE_PULSE = '[pulse] One line, in character: what\'s the floor doing right now?';
+
+// The primary Kane console is always constructed without an `instanceName` override (see
+// toggleGod below), so GodConsole's own default ('Kane', in god-console.ts) and this literal
+// can never disagree in practice. floorState() and sendToId() both read THIS constant — not
+// independent 'Kane' string literals — so the name the phone is shown and the name sendToId
+// checks against can never drift apart from each other.
+const KANE_NAME = 'Kane';
 
 /** Controls bar + a bubbling stage of embedded claude terminals, scoped to one repo group. */
 export class TerminalsGrid {
@@ -614,7 +622,7 @@ export class TerminalsGrid {
 		if (this.godConsole) {
 			const ko = this.godConsole.recentOutput();
 			out.unshift({
-				id: -1, name: 'Kane', repo: '—', branch: '—',
+				id: KANE_ID, name: KANE_NAME, repo: '—', branch: '—',
 				state: looksLikePrompt(ko) ? 'prompt' : looksLikeMenu(ko) ? 'menu' : 'running',
 				output: ko.split('\n').slice(-12).join('\n'), remoteOn: false,
 			});
@@ -630,11 +638,13 @@ export class TerminalsGrid {
 		if (t && !t.isJournal) (t as TerminalTile).toggleRemoteControl();
 	}
 
-	/** Phone: type a line into a terminal. Goes through the tile's own sendLine, which writes
-	 *  the text and the Enter on SEPARATE ticks — bundling "text\r" into one PTY write makes
-	 *  Claude treat the newline as pasted, so the message lands in the box unsent. A tile that
-	 *  closed since the phone's last poll is silently ignored.
-	 *  `name` must match the found tile's current name, or the message is dropped. Tile ids are
+	/** Phone: type a line into a terminal, or into Kane (id KANE_ID — see floorState). Terminal
+	 *  delivery goes through the tile's own sendLine, which writes the text and the Enter on
+	 *  SEPARATE ticks — bundling "text\r" into one PTY write makes Claude treat the newline as
+	 *  pasted, so the message lands in the box unsent. Kane delivery uses GodConsole.notify,
+	 *  which applies the same separated-Enter workaround. A tile that closed (or a Kane that was
+	 *  hidden/never opened) since the phone's last poll is silently ignored.
+	 *  `name` must match the target's current name, or the message is dropped. Tile ids are
 	 *  scoped to THIS grid (each workspace's counter starts at 1 independently), but the phone
 	 *  always reads and writes `activeGrid` — if the desk user switches workspaces after the
 	 *  phone's last poll, the phone's id N may now resolve to a completely different session
@@ -643,6 +653,13 @@ export class TerminalsGrid {
 	 *  direction versus guessing; a terminal rename between poll and send will also drop a
 	 *  queued message, which is an acceptable false-negative for the safety it buys. */
 	sendToId(id: number, text: string, name: string): void {
+		if (id === KANE_ID) {
+			// Compare against KANE_NAME — the exact value floorState() sent the phone for this id
+			// — not a fresh literal, so this check can never spuriously mismatch a correct target.
+			if (!this.godConsole || name !== KANE_NAME) return;
+			this.godConsole.notify(text);
+			return;
+		}
 		const tile = [...this.tiles, ...this.hidden].find((t) => t.tileId === id);
 		if (!tile || tile.isJournal) return;
 		if ((tile as TerminalTile).name !== name) return;

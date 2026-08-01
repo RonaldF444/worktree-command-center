@@ -20,7 +20,7 @@ own dictation works — so the feature degrades instead of breaking.
 | Speech engine | **`webkitSpeechRecognition` in the page.** No audio leaves the phone for our servers; Apple performs the recognition. No API key, no cost, no new dependency. |
 | Send gesture | **Release fills the field; a tap sends.** NOT auto-send — see §6. |
 | Fallback | Mic hidden unless `window.isSecureContext && 'webkitSpeechRecognition' in window`. The text field is always present; iOS keyboard dictation works there over plain HTTP. |
-| Scope | Terminal tiles only. Kane (`id:-1`) is out. |
+| Scope | Terminal tiles **and Kane** (`id:KANE_ID`, i.e. `-1` — see `electron/remote-actions.ts`). Kane gets the talk button + compose row; the 📱 Remote control button stays tile-only (`id>=0`) — he has no Claude-remote-control toggle. *Superseded 2026-07-31: the original design shipped with Kane excluded; a follow-up task lifted the input-side exclusion. See task-6-report.md.* |
 | Tailscale setup | **Manual, one-time.** WCC detects and displays, never configures. |
 
 ## 3. Architecture
@@ -153,5 +153,6 @@ fallback exists precisely so a disappointing answer costs nothing.
 ## 8. Out of scope
 
 Auto-send; Approve/Deny buttons for permission prompts; uploading audio for server-side
-transcription (Whisper et al.); voice into Kane; Android tuning; automating `tailscale serve`;
-cross-workspace floor; changing the read-only floor view itself.
+transcription (Whisper et al.); Android tuning; automating `tailscale serve`;
+cross-workspace floor; changing the read-only floor view itself; duplicate Kane consoles
+(`extraKanes`) on the floor — only the primary Kane is reachable from the phone.
