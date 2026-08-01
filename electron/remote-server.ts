@@ -52,67 +52,79 @@ export function startRemoteServer(opts: RemoteServerOpts): { token: string } {
 	return { token };
 }
 
-// A simplified MIRROR of the desktop floor, sized for a phone held next to the machine — see
-// docs/superpowers/specs/2026-08-01-phone-mirror-layout-design.md. It is a control surface, not
-// a standalone viewer: workspaces and the focused terminal match what is on the desk, tapping
-// either moves the desk, and only the focused terminal shows any output.
+// A CAROUSEL of the floor, sized for a phone held next to the machine — see
+// docs/superpowers/specs/2026-08-01-phone-mirror-layout-design.md. The focused session holds the
+// middle with its output and a mic; its neighbours peek in at both edges; swipe or tap a peek to
+// move the spotlight, which moves the desk too. Workspaces top-left, Kane top-right.
 //
-// The script below is ES5 on purpose (it runs on the phone and lives inside a TypeScript
-// template literal): `var`/`function` only, and every literal backtick and ${ must stay escaped.
-// NOTHING in this repo executes this page — tsc cannot, and no test does — so trace changes by
-// hand or extract the script and run it under a DOM shim before trusting it.
+// EVERY element the script attaches a listener to is STABLE (#prev/#next/#mic/#f/#send/#spbtn/
+// #spgo) — render() only rewrites innerHTML inside containers, never replaces those nodes. That
+// is what keeps listeners bound and stops a 2s poll from wiping what you are typing.
+//
+// The script is ES5 on purpose (it runs on the phone, inside a TypeScript template literal):
+// `var`/`function` only, and every literal backtick and ${ must stay escaped. NOTHING in this
+// repo executes this page — tsc cannot, and no test does — so trace changes by hand or extract
+// the script and run it under a DOM shim before trusting it.
 const MOBILE_HTML = `<!doctype html><html><head><meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover"/>
 <title>Floor</title><style>
-/* Forge & River, distilled for a phone: the desktop's warm forge-charcoal and molten gold,
-   monospace for anything that names a session, and every target sized for one thumb. Tokens
-   mirror app.css so the phone reads as the same tool, not a companion app. */
+/* Forge & River, distilled: the desktop's warm forge-charcoal and molten gold, monospace for
+   anything naming a session, tokens mirrored from app.css so this reads as the same tool. */
 :root{--bg:#100f0c;--bg2:#16140f;--panel:#1b1813;--panel2:#241f17;--bd:#383128;--bd2:#524735;
 --tx:#ede7d8;--mut:#a99f89;--faint:#756c5a;--gold:#d39a2e;--gold2:#efb947;--ongold:#1a1408;
---green:#48b87a;--red:#f0623a;--cyan:#6fa0c8;--yellow:#e0b53a;
+--red:#f0623a;--cyan:#6fa0c8;--yellow:#e0b53a;
 --mono:'JetBrains Mono','Cascadia Code',ui-monospace,Consolas,monospace}
 *{box-sizing:border-box}
 html,body{height:100%}
 body{margin:0;background:var(--bg);color:var(--tx);font-family:system-ui,-apple-system,'Segoe UI',sans-serif;-webkit-text-size-adjust:100%;display:flex;flex-direction:column;overscroll-behavior:none}
-header{display:flex;align-items:center;gap:6px;padding:10px 12px;background:linear-gradient(180deg,var(--bg2),var(--bg));border-bottom:1px solid var(--bd);position:sticky;top:0;z-index:2}
-.ws{font-family:var(--mono);padding:9px 13px;border-radius:8px;font-size:12px;font-weight:600;letter-spacing:.02em;color:var(--mut);background:transparent;border:1px solid transparent}
-.ws.on{color:var(--gold2);background:var(--panel);border-color:var(--bd2);box-shadow:inset 0 1px 0 rgba(239,185,71,.12)}
-.kane{margin-left:auto;font-family:var(--mono);padding:9px 14px;border-radius:999px;font-size:12px;font-weight:700;background:var(--panel);border:1px solid var(--bd2);color:var(--mut)}
+header{display:flex;align-items:flex-start;gap:8px;padding:9px 10px;border-bottom:1px solid var(--bd);background:var(--bg2)}
+#ws{display:flex;flex-wrap:wrap;gap:5px;flex:1;min-width:0}
+.ws{font-family:var(--mono);padding:6px 9px;border-radius:7px;font-size:11px;font-weight:600;color:var(--mut);background:transparent;border:1px solid transparent}
+.ws.on{color:var(--gold2);background:var(--panel);border-color:var(--bd2)}
+.kane{flex:none;font-family:var(--mono);padding:7px 13px;border-radius:7px;font-size:11px;font-weight:700;background:var(--panel);border:1px solid var(--bd2);color:var(--mut)}
 .kane.on{background:var(--gold);border-color:var(--gold2);color:var(--ongold)}
-main{flex:1;overflow:auto;padding:12px 12px 4px}
-/* The focused session owns the screen — it is the only one showing text, so it earns the room. */
-.focus{position:relative;border:1px solid var(--bd2);border-left:3px solid var(--gold);border-radius:10px;background:var(--panel);padding:13px 14px;margin-bottom:16px;box-shadow:0 6px 20px rgba(0,0,0,.45)}
-.fname{font-family:var(--mono);font-weight:700;font-size:15px;color:var(--tx);word-break:break-word}
-.fmeta{font-family:var(--mono);color:var(--faint);font-size:11px;margin:3px 0 10px}
-pre{margin:0;font-family:var(--mono);font-size:11px;line-height:1.5;color:var(--mut);white-space:pre-wrap;word-break:break-word;max-height:32vh;overflow:auto;border-top:1px solid var(--bd);padding-top:9px}
-.empty{font-family:var(--mono);color:var(--faint);font-size:12px;padding:6px 0}
-.lbl{font-size:10px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--faint);margin:0 2px 7px}
-.sats{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px}
-.sat{display:flex;align-items:center;gap:9px;min-height:52px;border:1px solid var(--bd);border-radius:9px;background:var(--panel);color:var(--tx);padding:10px 11px;text-align:left}
-.sat:active{background:var(--panel2);border-color:var(--bd2)}
-.sat.hid{background:transparent;border-style:dashed;opacity:.6}
-.sn{font-family:var(--mono);font-size:11.5px;font-weight:600;line-height:1.3;overflow:hidden;display:block;max-height:2.6em}
+/* The carousel: neighbours peek in at both edges so it is obvious which way to swipe. */
+.strip{position:relative;flex:1;display:flex;gap:6px;padding:10px 8px;min-height:0}
+.peek{flex:0 0 15%;min-width:44px;border:1px solid var(--bd);border-radius:9px;background:var(--panel);color:var(--mut);padding:9px 3px;overflow:hidden;display:flex;flex-direction:column;align-items:center;gap:7px}
+.peek:active{background:var(--panel2)}
+.peek.none{opacity:0;pointer-events:none}
+.pn{font-family:var(--mono);font-size:10.5px;font-weight:600;writing-mode:vertical-rl;text-orientation:mixed;overflow:hidden;max-height:100%;letter-spacing:.02em}
+.stage{position:relative;flex:1;min-width:0;border:2px solid var(--gold);border-radius:11px;background:var(--panel);padding:12px 13px 74px;overflow:hidden;box-shadow:0 8px 26px rgba(0,0,0,.5)}
+.sname{font-family:var(--mono);font-weight:700;font-size:14px;word-break:break-word}
+.smeta{font-family:var(--mono);color:var(--faint);font-size:10.5px;margin:3px 0 9px}
+pre{margin:0;font-family:var(--mono);font-size:10.5px;line-height:1.55;color:var(--mut);white-space:pre-wrap;word-break:break-word;height:100%;overflow:auto;border-top:1px solid var(--bd);padding-top:8px}
+.empty{font-family:var(--mono);color:var(--faint);font-size:11.5px}
 .dot{flex:none;width:9px;height:9px;border-radius:50%}
 .d-prompt,.d-menu{background:var(--yellow);box-shadow:0 0 8px rgba(224,181,58,.55)}
 .d-errored{background:var(--red);box-shadow:0 0 8px rgba(240,98,58,.5)}
 .d-idle{background:var(--faint)}.d-running{background:var(--cyan)}
-footer{border-top:1px solid var(--bd);background:var(--bg2);padding:9px 10px calc(9px + env(safe-area-inset-bottom))}
-.bar{display:flex;gap:7px;align-items:stretch}
-.bar input{flex:1;min-width:0;background:var(--bg);color:var(--tx);border:1px solid var(--bd2);border-radius:9px;padding:0 13px;font-size:16px;font-family:var(--mono);min-height:50px}
-.bar button{border:none;border-radius:9px;min-height:50px;padding:0 16px;font-size:14px;font-weight:700;background:var(--gold);color:var(--ongold)}
-.mic{background:var(--panel);border:1px solid var(--bd2);color:var(--tx);font-size:19px;min-width:56px}
-.mic.rec{background:var(--red);border-color:var(--red);color:#fff}
-.mic.off{opacity:.35}
-.err{font-family:var(--mono);color:var(--gold2);font-size:11px;padding:5px 3px 0;min-height:16px}
-.sp button{width:100%;background:transparent;border:1px dashed var(--bd2);color:var(--mut);border-radius:9px;min-height:44px;font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;font-family:var(--mono)}
-#spawn{display:none;margin-top:8px}
-#spawn select,#spawn input,#spawn textarea{width:100%;margin-bottom:7px;background:var(--bg);color:var(--tx);border:1px solid var(--bd2);border-radius:9px;padding:12px;font-size:16px;font-family:var(--mono)}
-#spawn .go{width:100%;background:var(--gold);color:var(--ongold);border:none;border-radius:9px;min-height:50px;font-size:14px;font-weight:700}
+/* The mic is the hero control: a thumb-sized circle on the focused card. It is a STABLE node
+   parked over the stage, never inside render()'s innerHTML, so its listeners survive polls. */
+#mic{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);width:62px;height:62px;border-radius:50%;font-size:25px;background:var(--panel2);border:2px solid var(--bd2);color:var(--tx);box-shadow:0 5px 16px rgba(0,0,0,.5);z-index:3}
+#mic.rec{background:var(--red);border-color:var(--red);color:#fff;box-shadow:0 0 0 8px rgba(240,98,58,.18)}
+#mic.off{opacity:.3}
+#tray{display:flex;flex-wrap:wrap;gap:6px;padding:0 10px 8px}
+.hchip{font-family:var(--mono);font-size:10px;padding:6px 9px;border-radius:7px;border:1px dashed var(--bd2);background:transparent;color:var(--faint)}
+footer{border-top:1px solid var(--bd);background:var(--bg2);padding:8px 10px calc(8px + env(safe-area-inset-bottom))}
+.bar{display:flex;gap:6px}
+.bar input{flex:1;min-width:0;background:var(--bg);color:var(--tx);border:1px solid var(--bd2);border-radius:9px;padding:0 12px;font-size:16px;font-family:var(--mono);min-height:46px}
+.bar button{border:none;border-radius:9px;min-height:46px;padding:0 15px;font-size:13px;font-weight:700;background:var(--gold);color:var(--ongold)}
+.err{font-family:var(--mono);color:var(--gold2);font-size:10.5px;padding:5px 3px 0;min-height:15px}
+.sp button{width:100%;background:transparent;border:1px dashed var(--bd2);color:var(--mut);border-radius:9px;min-height:40px;font-size:11px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;font-family:var(--mono)}
+#spawn{display:none;margin-top:7px}
+#spawn select,#spawn input,#spawn textarea{width:100%;margin-bottom:6px;background:var(--bg);color:var(--tx);border:1px solid var(--bd2);border-radius:9px;padding:11px;font-size:16px;font-family:var(--mono)}
+#spawn .go{width:100%;background:var(--gold);color:var(--ongold);border:none;border-radius:9px;min-height:46px;font-size:13px;font-weight:700}
 </style></head><body>
-<header id="hd"></header>
-<main id="main"><div id="focus"></div><div id="sats"></div></main>
+<header><div id="ws"></div><button class="kane" id="kanebtn" style="display:none">kane</button></header>
+<div class="strip" id="strip">
+<button class="peek" id="prev"></button>
+<section class="stage" id="stage"></section>
+<button class="peek" id="next"></button>
+<button id="mic">🎤</button>
+</div>
+<div id="tray"></div>
 <footer>
-<div class="bar"><input id="f" placeholder="talk…"/><button class="mic" id="mic">🎤</button><button id="send">Send</button></div>
+<div class="bar"><input id="f" placeholder="talk…"/><button id="send">Send</button></div>
 <div class="err" id="err"></div>
 <div class="sp"><button id="spbtn">+ Spawn</button></div>
 <div id="spawn"><select id="repo"></select><input id="base" placeholder="base branch (blank = main)"/><textarea id="task" rows="2" placeholder="kickoff task…"></textarea><button class="go" id="spgo">Spawn it</button></div>
@@ -127,10 +139,14 @@ var CAN_MIC=!!SRC&&window.isSecureContext;
 function post(a){return fetch('/api/action?t='+T,{method:'POST',body:JSON.stringify(a)});}
 function esc(s){return (s||'').replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
 function err(m){document.getElementById('err').textContent=m||'';}
-function centered(d){var ts=(d&&d.terminals)||[];for(var i=0;i<ts.length;i++){if(ts[i].id===d.centeredId)return ts[i];}return null;}
-// What the compose bar is aimed at: Kane while his pill is lit, otherwise the focused tile.
-// The name rides along because sendToId drops a message whose name does not match the tile it
-// finds — ids are workspace-scoped, and mirroring makes a stale list likelier, not rarer.
+// The carousel rotates ON-STAGE sessions only: a hidden one is alive but off the stage at the
+// desk, so it sits in the tray instead and rejoins when you bring it back.
+function stageList(d){var o=[],ts=(d&&d.terminals)||[];for(var i=0;i<ts.length;i++){if(!ts[i].hidden)o.push(ts[i]);}return o;}
+function idxOf(l,id){for(var i=0;i<l.length;i++){if(l[i].id===id)return i;}return -1;}
+function centered(d){var l=stageList(d),i=idxOf(l,d&&d.centeredId);return i<0?null:l[i];}
+// What the compose bar and mic are aimed at: Kane while his pill is lit, else the focused
+// session. The name rides along because sendToId drops a message whose name does not match the
+// tile it finds — ids are workspace-scoped, and mirroring makes a stale list likelier.
 function target(){
   if(!LAST)return null;
   if(TARGET==='kane'&&LAST.kane)return {id:KANE,name:LAST.kane.name};
@@ -140,10 +156,17 @@ function ws(id){
   if(LAST&&LAST.workspaces){for(var i=0;i<LAST.workspaces.length;i++){LAST.workspaces[i].active=LAST.workspaces[i].id===id;}render(LAST);}
   post({type:'workspace',id:id});
 }
-// Optimistic: repaint with the new focus immediately so a tap feels instant. Its output is
-// blank until the next poll, because the desktop only sends a tail for the focused tile.
+// Optimistic: repaint with the new focus immediately so a swipe feels instant. Its output is
+// blank until the next poll, because the desktop only sends a tail for the focused session.
 function focusTile(id){TARGET='focus';if(LAST){LAST.centeredId=id;render(LAST);}post({type:'center',id:id});}
 function kane(){TARGET=TARGET==='kane'?'focus':'kane';if(LAST)render(LAST);}
+function step(dir){
+  if(!LAST)return;
+  var l=stageList(LAST);
+  if(l.length<2)return;
+  var i=idxOf(l,LAST.centeredId);if(i<0)i=0;
+  focusTile(l[(i+dir+l.length)%l.length].id);
+}
 function send(){
   var t=target();if(!t){err('nothing focused');return;}
   var f=document.getElementById('f'),v=(f.value||'').trim();if(!v)return;
@@ -151,6 +174,13 @@ function send(){
     if(!r.ok){err('send failed ('+r.status+')');return;}
     f.value='';err('sent to '+t.name);
   }).catch(function(){err('send failed — offline?');});
+}
+// Why the mic can't run, in the user's terms. NEVER hide the button silently: an absent control
+// is indistinguishable from a broken one, and the two causes need different fixes.
+function micWhy(){
+  if(!SRC)return 'this browser has no speech API — use the mic on your keyboard instead';
+  if(!window.isSecureContext)return 'mic needs the https:// link (tailscale serve) — you are on http://';
+  return '';
 }
 function micDown(){
   if(!CAN_MIC)return;
@@ -160,9 +190,9 @@ function micDown(){
   rec=new SRC();rec.lang='en-US';rec.interimResults=true;rec.continuous=false;
   rec.onresult=function(e){var s='';for(var i=0;i<e.results.length;i++){s+=e.results[i][0].transcript;}f.value=base+s;};
   rec.onerror=function(e){err(e.error==='not-allowed'?'mic permission denied':e.error==='no-speech'?'didn\\'t catch that':e.error);};
-  try{rec.start();document.getElementById('mic').className='mic rec';}catch(_e){}
+  try{rec.start();document.getElementById('mic').className='rec';}catch(_e){}
 }
-function micUp(){if(rec){try{rec.stop();}catch(_e){}rec=null;}document.getElementById('mic').className='mic';}
+function micUp(){if(rec){try{rec.stop();}catch(_e){}rec=null;}document.getElementById('mic').className='';}
 function toggleSpawn(){var s=document.getElementById('spawn');s.style.display=s.style.display==='block'?'none':'block';}
 function spawn(){
   var r=document.getElementById('repo').value,b=document.getElementById('base').value.trim(),t=document.getElementById('task').value.trim();
@@ -173,72 +203,61 @@ function spawn(){
   }).catch(function(){err('spawn failed — offline?');});
 }
 var repoFilled=false;
-// Repaints the header, the focused pane and the satellites. The compose bar deliberately lives
-// OUTSIDE all three: a poll can then never wipe what you are typing or orphan a live recognizer,
-// which is the entire failure class the old per-card compose rows kept falling into.
+function peek(el,t){
+  if(!t){el.className='peek none';el.innerHTML='';el.onclick=null;return;}
+  el.className='peek';
+  el.innerHTML='<span class="dot d-'+esc(t.state)+'"></span><span class="pn">'+esc(t.name)+'</span>';
+  el.onclick=function(){focusTile(t.id);};
+}
+// Rewrites the header, the two peeks, the stage and the tray. #mic, #f, #send and the spawn
+// controls are deliberately OUTSIDE all of them, so a poll can never wipe what you are typing
+// or detach a listener mid-gesture.
 function render(d){
   if(!repoFilled&&(d.repos||[]).length){document.getElementById('repo').innerHTML=d.repos.map(function(r){return '<option>'+esc(r)+'</option>';}).join('');repoFilled=true;}
-  var h=(d.workspaces||[]).map(function(w){return '<button class="ws'+(w.active?' on':'')+'" onclick="ws(\\''+esc(w.id)+'\\')">'+esc(w.name)+'</button>';}).join('');
-  if(d.kane)h+='<button class="kane'+(TARGET==='kane'?' on':'')+'" onclick="kane()">◉ Kane</button>';
-  document.getElementById('hd').innerHTML=h;
-  var c=centered(d),fh;
-  if(TARGET==='kane'&&d.kane){fh='<div class="focus"><div class="fname">Kane</div><div class="fmeta">overseer · talking to him</div><pre>'+esc(d.kane.output||'')+'</pre></div>';}
-  else if(c){fh='<div class="focus"><div class="fname">'+esc(c.name)+'</div><div class="fmeta">'+esc(c.repo)+' · '+esc(c.branch)+'</div><pre>'+esc(c.output||'')+'</pre></div>';}
-  else{fh='<div class="focus"><div class="empty">nothing focused — tap a session below</div></div>';}
-  document.getElementById('focus').innerHTML=fh;
-  // Two groups, because a hidden session is alive but OFF the stage on the desk. Mixing them
-  // into one list is what made the page unreadable: you could not tell what you were looking at.
-  var stage=[],hid=[],ts=(d.terminals||[]);
-  for(var i=0;i<ts.length;i++){if(ts[i].id===d.centeredId)continue;(ts[i].hidden?hid:stage).push(ts[i]);}
-  var out='';
-  if(stage.length)out+='<div class="lbl">on stage'+(stage.length?' · swipe ‹ › to switch':'')+'</div><div class="sats">'+stage.map(sat).join('')+'</div>';
-  if(hid.length)out+='<div class="lbl">hidden · tap to bring back</div><div class="sats">'+hid.map(sat).join('')+'</div>';
-  if(!stage.length&&!hid.length)out='<div class="empty">no other sessions</div>';
-  document.getElementById('sats').innerHTML=out;
-}
-function sat(t){
-  return '<button class="sat'+(t.hidden?' hid':'')+'" onclick="focusTile('+t.id+')">'+
-    '<span class="dot d-'+esc(t.state)+'"></span><span class="sn">'+esc(t.name)+'</span></button>';
+  document.getElementById('ws').innerHTML=(d.workspaces||[]).map(function(w){
+    return '<button class="ws'+(w.active?' on':'')+'" onclick="ws(\\''+esc(w.id)+'\\')">'+esc(w.name)+'</button>';
+  }).join('');
+  var kb=document.getElementById('kanebtn');
+  kb.style.display=d.kane?'':'none';
+  kb.className='kane'+(TARGET==='kane'?' on':'');
+  var l=stageList(d),i=idxOf(l,d.centeredId),c=i<0?null:l[i];
+  if(TARGET==='kane'&&d.kane){
+    document.getElementById('stage').innerHTML='<div class="sname">Kane</div><div class="smeta">overseer · talking to him</div><pre>'+esc(d.kane.output||'')+'</pre>';
+  }else if(c){
+    document.getElementById('stage').innerHTML='<div class="sname">'+esc(c.name)+'</div><div class="smeta">'+esc(c.repo)+' · '+esc(c.branch)+'</div><pre>'+esc(c.output||'')+'</pre>';
+  }else{
+    document.getElementById('stage').innerHTML='<div class="empty">nothing focused — tap a neighbour or spawn one</div>';
+  }
+  var n=l.length;
+  peek(document.getElementById('prev'),n>1&&i>=0?l[(i-1+n)%n]:(n&&i<0?l[n-1]:null));
+  peek(document.getElementById('next'),n>1&&i>=0?l[(i+1)%n]:(n&&i<0?l[0]:null));
+  var hid=[],ts=(d.terminals||[]);
+  for(var k=0;k<ts.length;k++){if(ts[k].hidden)hid.push(ts[k]);}
+  document.getElementById('tray').innerHTML=hid.length
+    ?hid.map(function(t){return '<button class="hchip" onclick="focusTile('+t.id+')">hidden · '+esc(t.name)+'</button>';}).join('')
+    :'';
 }
 document.getElementById('send').addEventListener('click',send);
 document.getElementById('spbtn').addEventListener('click',toggleSpawn);
 document.getElementById('spgo').addEventListener('click',spawn);
-// Why the mic can't run, in the user's terms. NEVER hide the button silently: an absent
-// control is indistinguishable from a broken one, and the two causes need different fixes.
-function micWhy(){
-  if(!SRC)return 'this browser has no speech API — use the mic on your keyboard instead';
-  if(!window.isSecureContext)return 'mic needs the https:// link (tailscale serve) — you are on http://';
-  return '';
-}
+document.getElementById('kanebtn').addEventListener('click',kane);
 var mb=document.getElementById('mic');
 if(!CAN_MIC){
-  mb.className='mic off';
+  mb.className='off';
   mb.addEventListener('click',function(){err(micWhy());});
   document.getElementById('f').placeholder='type — or hold your keyboard mic';
 }else{mb.addEventListener('pointerdown',micDown);mb.addEventListener('pointerup',micUp);mb.addEventListener('pointercancel',micUp);}
-
-// Swipe the stage left/right to move the spotlight, mirroring Alt+←/→ at the desk. Cycles the
-// ON-STAGE sessions only — a hidden one is off the stage, so it is not in the rotation.
-function step(dir){
-  if(!LAST)return;
-  var st=(LAST.terminals||[]).filter(function(t){return !t.hidden;});
-  if(st.length<2)return;
-  var i=-1;
-  for(var k=0;k<st.length;k++){if(st[k].id===LAST.centeredId)i=k;}
-  if(i<0)i=0;
-  focusTile(st[(i+dir+st.length)%st.length].id);
-}
-var sx=null,sy=null;
-var mainEl=document.getElementById('main');
-mainEl.addEventListener('touchstart',function(e){
+// Swipe the strip to move the spotlight, mirroring Alt+←/→ at the desk. Must be decisive and
+// clearly horizontal so scrolling the output pane never switches sessions by accident.
+var sx=null,sy=null,strip=document.getElementById('strip');
+strip.addEventListener('touchstart',function(e){
   if(e.touches.length!==1){sx=null;return;}
   sx=e.touches[0].clientX;sy=e.touches[0].clientY;
 },{passive:true});
-mainEl.addEventListener('touchend',function(e){
+strip.addEventListener('touchend',function(e){
   if(sx===null)return;
   var t=e.changedTouches[0],dx=t.clientX-sx,dy=t.clientY-sy;
   sx=null;
-  // Decisive and horizontal, so scrolling the output pane never switches sessions by accident.
   if(Math.abs(dx)<55||Math.abs(dx)<Math.abs(dy)*1.5)return;
   step(dx<0?1:-1);
 },{passive:true});
