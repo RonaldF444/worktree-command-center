@@ -28,7 +28,7 @@ declare global {
 			setConfig(c: any): Promise<boolean>;
 			addFolder(): Promise<string | null>;
 			pushFloorState(s: unknown): void;
-			onRemoteAction(cb: (a: { type: string; id?: number; repo?: string; base?: string | null; task?: string; text?: string; name?: string }) => void): void;
+			onRemoteAction(cb: (a: { type: string; id?: number | string; repo?: string; base?: string | null; task?: string; text?: string; name?: string }) => void): void;
 			remoteInfo(): Promise<{ token: string; port: number; urls: string[]; httpsUrl: string | null }>;
 			onShellDigit(cb: (n: number) => void): void;
 		};
@@ -267,11 +267,18 @@ async function main(): Promise<void> {
 
 		// Phone floor view: push the active workspace's floor to the main-process server every 2s,
 		// and run actions the phone sends back (toggle remote-control / spawn).
-		window.setInterval(() => window.wcc.pushFloorState({ terminals: activeGrid.floorState(), repos: activeGrid.repoNames() }), 2000);
+		window.setInterval(() => window.wcc.pushFloorState({
+			...activeGrid.floorState(),
+			workspaces: workspaces.map((w) => ({ id: w.id, name: w.name, active: w.id === activeId })),
+			repos: activeGrid.repoNames(),
+		}), 2000);
 		window.wcc.onRemoteAction((a) => {
 			if (a.type === 'remote' && typeof a.id === 'number') activeGrid.toggleRemoteById(a.id);
 			else if (a.type === 'spawn' && a.repo && a.task) void activeGrid.spawnFromName(a.repo, a.base ?? null, a.task);
 			else if (a.type === 'input' && typeof a.id === 'number' && a.text && a.name) activeGrid.sendToId(a.id, a.text, a.name);
+			// The phone mirrors the desk, so these move what is on screen here.
+			else if (a.type === 'center' && typeof a.id === 'number') activeGrid.centerById(a.id);
+			else if (a.type === 'workspace' && typeof a.id === 'string') void switchTo(a.id);
 		});
 
 		// 📱 Phone button → panel with the Tailscale URLs to open on your phone.

@@ -28,7 +28,15 @@ import type { StageTile } from './stage-tile';
 import { KANE_ID } from '../../electron/remote-actions';
 
 export interface RepoConfig { name: string; path: string; remote?: string; group?: string; }
-export interface RemoteTerminal { id: number; name: string; repo: string; branch: string; state: string; output: string; remoteOn: boolean; }
+/** One tile as the phone sees it. `output` rides along ONLY for the focused tile — the phone
+ *  mirrors a screen you are sitting in front of, so satellites need a name and a state dot and
+ *  nothing else. That keeps the 2s poll roughly 12× smaller than sending every tile's tail. */
+export interface RemoteTerminal { id: number; name: string; repo: string; branch: string; state: string; remoteOn: boolean; output?: string; }
+
+/** The floor as the phone sees it. Kane is NOT in `terminals`: on the desk he is a side console,
+ *  not a tile on the stage, and the phone renders him as a pill. He is still a valid input
+ *  target (KANE_ID), just never a centre target. */
+export interface FloorSnapshot { centeredId: number | null; kane: { name: string; state: string; output: string } | null; terminals: RemoteTerminal[]; }
 
 export interface GridDeps {
 	repos: RepoConfig[];
@@ -614,20 +622,35 @@ export class TerminalsGrid {
 	}
 
 	/** Floor snapshot for the phone view: every session (+ Kane) with state + recent output. */
-	floorState(): RemoteTerminal[] {
-		const out: RemoteTerminal[] = (this.allSessions().filter((t) => !t.isJournal) as TerminalTile[]).map((t) => ({
+	floorState(): FloorSnapshot {
+		const centeredId = this.centeredId;
+		const tail = (s: string): string => s.split('\n').slice(-12).join('\n');
+		const terminals: RemoteTerminal[] = (this.allSessions().filter((t) => !t.isJournal) as TerminalTile[]).map((t) => ({
 			id: t.tileId, name: t.name, repo: this.repoNameFor(t), branch: t.branch,
-			state: this.tileState(t), output: t.recentOutput().split('\n').slice(-12).join('\n'), remoteOn: t.isRemoteOn,
+			state: this.tileState(t), remoteOn: t.isRemoteOn,
+			...(t.tileId === centeredId ? { output: tail(t.recentOutput()) } : {}),
 		}));
-		if (this.godConsole) {
-			const ko = this.godConsole.recentOutput();
-			out.unshift({
-				id: KANE_ID, name: KANE_NAME, repo: '—', branch: '—',
-				state: looksLikePrompt(ko) ? 'prompt' : looksLikeMenu(ko) ? 'menu' : 'running',
-				output: ko.split('\n').slice(-12).join('\n'), remoteOn: false,
-			});
-		}
-		return out;
+		// Kane's tail always rides along, even though the phone only shows it while he is the
+		// selected target: targeting is a client-side toggle the server never hears about, and
+		// one console's worth of tail is not worth a round trip to discover.
+		const ko = this.godConsole?.recentOutput();
+		return {
+			centeredId,
+			// `name` is carried so the phone can echo it back on an input action: sendToId's
+			// name guard applies to Kane too, and he is no longer in `terminals` for the page
+			// to learn it from. Without this every message to Kane would silently drop.
+			kane: ko === undefined ? null
+				: { name: KANE_NAME, state: looksLikePrompt(ko) ? 'prompt' : looksLikeMenu(ko) ? 'menu' : 'running', output: tail(ko) },
+			terminals,
+		};
+	}
+
+	/** Phone: focus a tile. Routes through the same path as a click at the desk, so it pins the
+	 *  tile and holds the spotlight — a choice you made deliberately from your phone must not be
+	 *  yanked back by the auto-decider a second later. */
+	centerById(id: number): void {
+		if (!this.tiles.some((t) => t.tileId === id)) return;
+		this.handleClick(id);
 	}
 
 	repoNames(): string[] { return this.repos.map((r) => r.name); }

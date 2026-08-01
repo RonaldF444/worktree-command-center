@@ -4,7 +4,9 @@
 export type RemoteAction =
 	| { type: 'remote'; id: number }
 	| { type: 'spawn'; repo: string; base: string | null; task: string }
-	| { type: 'input'; id: number; text: string; name: string };
+	| { type: 'input'; id: number; text: string; name: string }
+	| { type: 'center'; id: number }
+	| { type: 'workspace'; id: string };
 
 /** Longest message accepted from the phone. Speech transcripts are short; the HTTP body cap
  *  (100KB) is far too generous for something that gets typed into an agent. */
@@ -26,6 +28,16 @@ export function parseRemoteAction(raw: unknown): RemoteAction | null {
 	if (!raw || typeof raw !== 'object') return null;
 	const a = raw as Record<string, unknown>;
 	if (a.type === 'remote') return isTileId(a.id) ? { type: 'remote', id: a.id } : null;
+	// The phone mirrors the desk: centring a tile there moves the spotlight here. Kane is
+	// rejected on purpose — on the desk he is a side console, not a tile on the stage, so
+	// there is nothing to centre. (He is still a valid `input` target; see isInputTargetId.)
+	if (a.type === 'center') return isTileId(a.id) ? { type: 'center', id: a.id } : null;
+	if (a.type === 'workspace') {
+		// A workspace id is a config string, not a tile id. An id that no longer exists is a
+		// no-op downstream (switchTo already guards), so shape is all we check here.
+		if (typeof a.id !== 'string' || !a.id.trim()) return null;
+		return { type: 'workspace', id: a.id.trim() };
+	}
 	if (a.type === 'spawn') {
 		if (typeof a.repo !== 'string' || !a.repo.trim()) return null;
 		if (typeof a.task !== 'string' || !a.task.trim()) return null;

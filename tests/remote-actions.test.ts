@@ -1,6 +1,31 @@
 import { describe, it, expect } from 'vitest';
 import { parseRemoteAction, MAX_INPUT, KANE_ID } from '../electron/remote-actions';
 
+describe('parseRemoteAction — mirror actions (center / workspace)', () => {
+	it('accepts centering a real tile', () => {
+		expect(parseRemoteAction({ type: 'center', id: 4 })).toEqual({ type: 'center', id: 4 });
+		expect(parseRemoteAction({ type: 'center', id: 0 })).toEqual({ type: 'center', id: 0 });
+	});
+	it('refuses to centre Kane — he is a side console on the desk, not a stage tile', () => {
+		expect(parseRemoteAction({ type: 'center', id: KANE_ID })).toBeNull();
+	});
+	it('rejects malformed centre targets', () => {
+		expect(parseRemoteAction({ type: 'center', id: -2 })).toBeNull();
+		expect(parseRemoteAction({ type: 'center', id: 1.5 })).toBeNull();
+		expect(parseRemoteAction({ type: 'center' })).toBeNull();
+		expect(parseRemoteAction({ type: 'center', id: '3' })).toBeNull();
+	});
+	it('accepts a workspace switch, trimmed', () => {
+		expect(parseRemoteAction({ type: 'workspace', id: ' cardtsar ' })).toEqual({ type: 'workspace', id: 'cardtsar' });
+	});
+	it('rejects an empty, blank or non-string workspace id', () => {
+		expect(parseRemoteAction({ type: 'workspace', id: '   ' })).toBeNull();
+		expect(parseRemoteAction({ type: 'workspace', id: '' })).toBeNull();
+		expect(parseRemoteAction({ type: 'workspace', id: 7 })).toBeNull();
+		expect(parseRemoteAction({ type: 'workspace' })).toBeNull();
+	});
+});
+
 describe('parseRemoteAction', () => {
 	it('accepts a remote toggle', () => {
 		expect(parseRemoteAction({ type: 'remote', id: 3 })).toEqual({ type: 'remote', id: 3 });
