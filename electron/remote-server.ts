@@ -102,6 +102,7 @@ footer{border-top:1px solid var(--bd);background:var(--bg2);padding:9px 10px cal
 .bar button{border:none;border-radius:9px;min-height:50px;padding:0 16px;font-size:14px;font-weight:700;background:var(--gold);color:var(--ongold)}
 .mic{background:var(--panel);border:1px solid var(--bd2);color:var(--tx);font-size:19px;min-width:56px}
 .mic.rec{background:var(--red);border-color:var(--red);color:#fff}
+.mic.off{opacity:.35}
 .err{font-family:var(--mono);color:var(--gold2);font-size:11px;padding:5px 3px 0;min-height:16px}
 .sp button{width:100%;background:transparent;border:1px dashed var(--bd2);color:var(--mut);border-radius:9px;min-height:44px;font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;font-family:var(--mono)}
 #spawn{display:none;margin-top:8px}
@@ -109,7 +110,7 @@ footer{border-top:1px solid var(--bd);background:var(--bg2);padding:9px 10px cal
 #spawn .go{width:100%;background:var(--gold);color:var(--ongold);border:none;border-radius:9px;min-height:50px;font-size:14px;font-weight:700}
 </style></head><body>
 <header id="hd"></header>
-<main><div id="focus"></div><div class="sats" id="sats"></div></main>
+<main id="main"><div id="focus"></div><div id="sats"></div></main>
 <footer>
 <div class="bar"><input id="f" placeholder="talk…"/><button class="mic" id="mic">🎤</button><button id="send">Send</button></div>
 <div class="err" id="err"></div>
@@ -190,7 +191,7 @@ function render(d){
   var stage=[],hid=[],ts=(d.terminals||[]);
   for(var i=0;i<ts.length;i++){if(ts[i].id===d.centeredId)continue;(ts[i].hidden?hid:stage).push(ts[i]);}
   var out='';
-  if(stage.length)out+='<div class="lbl">on stage</div><div class="sats">'+stage.map(sat).join('')+'</div>';
+  if(stage.length)out+='<div class="lbl">on stage'+(stage.length?' · swipe ‹ › to switch':'')+'</div><div class="sats">'+stage.map(sat).join('')+'</div>';
   if(hid.length)out+='<div class="lbl">hidden · tap to bring back</div><div class="sats">'+hid.map(sat).join('')+'</div>';
   if(!stage.length&&!hid.length)out='<div class="empty">no other sessions</div>';
   document.getElementById('sats').innerHTML=out;
@@ -202,9 +203,45 @@ function sat(t){
 document.getElementById('send').addEventListener('click',send);
 document.getElementById('spbtn').addEventListener('click',toggleSpawn);
 document.getElementById('spgo').addEventListener('click',spawn);
+// Why the mic can't run, in the user's terms. NEVER hide the button silently: an absent
+// control is indistinguishable from a broken one, and the two causes need different fixes.
+function micWhy(){
+  if(!SRC)return 'this browser has no speech API — use the mic on your keyboard instead';
+  if(!window.isSecureContext)return 'mic needs the https:// link (tailscale serve) — you are on http://';
+  return '';
+}
 var mb=document.getElementById('mic');
-if(!CAN_MIC){mb.style.display='none';document.getElementById('f').placeholder='type — or use your keyboard mic';}
-else{mb.addEventListener('pointerdown',micDown);mb.addEventListener('pointerup',micUp);mb.addEventListener('pointercancel',micUp);}
+if(!CAN_MIC){
+  mb.className='mic off';
+  mb.addEventListener('click',function(){err(micWhy());});
+  document.getElementById('f').placeholder='type — or hold your keyboard mic';
+}else{mb.addEventListener('pointerdown',micDown);mb.addEventListener('pointerup',micUp);mb.addEventListener('pointercancel',micUp);}
+
+// Swipe the stage left/right to move the spotlight, mirroring Alt+←/→ at the desk. Cycles the
+// ON-STAGE sessions only — a hidden one is off the stage, so it is not in the rotation.
+function step(dir){
+  if(!LAST)return;
+  var st=(LAST.terminals||[]).filter(function(t){return !t.hidden;});
+  if(st.length<2)return;
+  var i=-1;
+  for(var k=0;k<st.length;k++){if(st[k].id===LAST.centeredId)i=k;}
+  if(i<0)i=0;
+  focusTile(st[(i+dir+st.length)%st.length].id);
+}
+var sx=null,sy=null;
+var mainEl=document.getElementById('main');
+mainEl.addEventListener('touchstart',function(e){
+  if(e.touches.length!==1){sx=null;return;}
+  sx=e.touches[0].clientX;sy=e.touches[0].clientY;
+},{passive:true});
+mainEl.addEventListener('touchend',function(e){
+  if(sx===null)return;
+  var t=e.changedTouches[0],dx=t.clientX-sx,dy=t.clientY-sy;
+  sx=null;
+  // Decisive and horizontal, so scrolling the output pane never switches sessions by accident.
+  if(Math.abs(dx)<55||Math.abs(dx)<Math.abs(dy)*1.5)return;
+  step(dx<0?1:-1);
+},{passive:true});
 function poll(){fetch('/api/floor?t='+T).then(function(r){return r.json();}).then(function(d){LAST=d;render(d);}).catch(function(){err('disconnected');});}
 poll();setInterval(poll,2000);
 </script></body></html>`;
