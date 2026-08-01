@@ -64,37 +64,49 @@ export function startRemoteServer(opts: RemoteServerOpts): { token: string } {
 const MOBILE_HTML = `<!doctype html><html><head><meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover"/>
 <title>Floor</title><style>
-:root{--bg:#0e0f17;--bg2:#171925;--bd:#2a2d3e;--tx:#e3e5ee;--mut:#9aa0b4;--faint:#6b7186;--acc:#5b73ff;--yellow:#e0a92e;--red:#d2453e;--cyan:#39c5cf}
+/* Forge & River, distilled for a phone: the desktop's warm forge-charcoal and molten gold,
+   monospace for anything that names a session, and every target sized for one thumb. Tokens
+   mirror app.css so the phone reads as the same tool, not a companion app. */
+:root{--bg:#100f0c;--bg2:#16140f;--panel:#1b1813;--panel2:#241f17;--bd:#383128;--bd2:#524735;
+--tx:#ede7d8;--mut:#a99f89;--faint:#756c5a;--gold:#d39a2e;--gold2:#efb947;--ongold:#1a1408;
+--green:#48b87a;--red:#f0623a;--cyan:#6fa0c8;--yellow:#e0b53a;
+--mono:'JetBrains Mono','Cascadia Code',ui-monospace,Consolas,monospace}
 *{box-sizing:border-box}
 html,body{height:100%}
-body{margin:0;background:var(--bg);color:var(--tx);font-family:system-ui,sans-serif;font-size:15px;-webkit-text-size-adjust:100%;display:flex;flex-direction:column}
-header{display:flex;align-items:center;gap:6px;padding:10px 12px;background:var(--bg2);border-bottom:1px solid var(--bd);flex-wrap:wrap}
-.ws{padding:6px 11px;border-radius:999px;font-size:13px;font-weight:600;color:var(--mut);background:transparent;border:1px solid transparent}
-.ws.on{color:var(--tx);background:var(--bg);border-color:var(--bd)}
-.kane{margin-left:auto;padding:6px 12px;border-radius:999px;font-size:13px;font-weight:700;background:var(--bg);border:1px solid var(--bd);color:var(--mut)}
-.kane.on{background:var(--acc);border-color:var(--acc);color:#fff}
-main{flex:1;overflow:auto;padding:10px 12px}
-.focus{border:1px solid var(--bd);border-radius:12px;background:var(--bg2);padding:12px;margin-bottom:12px}
-.fname{font-weight:700;font-size:16px}
-.fmeta{color:var(--mut);font-size:12px;margin-bottom:8px}
-pre{margin:0;font-size:11.5px;color:#9fb8a8;white-space:pre-wrap;word-break:break-word;max-height:34vh;overflow:auto}
-.sats{display:flex;flex-wrap:wrap;gap:8px}
-.sat{flex:1 1 30%;min-width:100px;border:1px solid var(--bd);border-radius:10px;background:var(--bg2);color:var(--tx);padding:10px 9px;text-align:left}
-.sn{font-size:12px;font-weight:600;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-top:7px}
-.d-prompt,.d-menu{background:var(--yellow)}.d-errored{background:var(--red)}.d-idle{background:var(--mut)}.d-running{background:var(--cyan)}
-footer{border-top:1px solid var(--bd);background:var(--bg2);padding:8px 10px calc(8px + env(safe-area-inset-bottom))}
-.bar{display:flex;gap:6px;align-items:center}
-.bar input{flex:1;min-width:0;background:var(--bg);color:var(--tx);border:1px solid var(--bd);border-radius:10px;padding:12px;font-size:16px}
-.bar button{border:none;border-radius:10px;padding:12px 14px;font-size:15px;font-weight:600;background:var(--acc);color:#fff}
-.mic{background:var(--bg);border:1px solid var(--bd);color:var(--tx)}
+body{margin:0;background:var(--bg);color:var(--tx);font-family:system-ui,-apple-system,'Segoe UI',sans-serif;-webkit-text-size-adjust:100%;display:flex;flex-direction:column;overscroll-behavior:none}
+header{display:flex;align-items:center;gap:6px;padding:10px 12px;background:linear-gradient(180deg,var(--bg2),var(--bg));border-bottom:1px solid var(--bd);position:sticky;top:0;z-index:2}
+.ws{font-family:var(--mono);padding:9px 13px;border-radius:8px;font-size:12px;font-weight:600;letter-spacing:.02em;color:var(--mut);background:transparent;border:1px solid transparent}
+.ws.on{color:var(--gold2);background:var(--panel);border-color:var(--bd2);box-shadow:inset 0 1px 0 rgba(239,185,71,.12)}
+.kane{margin-left:auto;font-family:var(--mono);padding:9px 14px;border-radius:999px;font-size:12px;font-weight:700;background:var(--panel);border:1px solid var(--bd2);color:var(--mut)}
+.kane.on{background:var(--gold);border-color:var(--gold2);color:var(--ongold)}
+main{flex:1;overflow:auto;padding:12px 12px 4px}
+/* The focused session owns the screen — it is the only one showing text, so it earns the room. */
+.focus{position:relative;border:1px solid var(--bd2);border-left:3px solid var(--gold);border-radius:10px;background:var(--panel);padding:13px 14px;margin-bottom:16px;box-shadow:0 6px 20px rgba(0,0,0,.45)}
+.fname{font-family:var(--mono);font-weight:700;font-size:15px;color:var(--tx);word-break:break-word}
+.fmeta{font-family:var(--mono);color:var(--faint);font-size:11px;margin:3px 0 10px}
+pre{margin:0;font-family:var(--mono);font-size:11px;line-height:1.5;color:var(--mut);white-space:pre-wrap;word-break:break-word;max-height:32vh;overflow:auto;border-top:1px solid var(--bd);padding-top:9px}
+.empty{font-family:var(--mono);color:var(--faint);font-size:12px;padding:6px 0}
+.lbl{font-size:10px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--faint);margin:0 2px 7px}
+.sats{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px}
+.sat{display:flex;align-items:center;gap:9px;min-height:52px;border:1px solid var(--bd);border-radius:9px;background:var(--panel);color:var(--tx);padding:10px 11px;text-align:left}
+.sat:active{background:var(--panel2);border-color:var(--bd2)}
+.sat.hid{background:transparent;border-style:dashed;opacity:.6}
+.sn{font-family:var(--mono);font-size:11.5px;font-weight:600;line-height:1.3;overflow:hidden;display:block;max-height:2.6em}
+.dot{flex:none;width:9px;height:9px;border-radius:50%}
+.d-prompt,.d-menu{background:var(--yellow);box-shadow:0 0 8px rgba(224,181,58,.55)}
+.d-errored{background:var(--red);box-shadow:0 0 8px rgba(240,98,58,.5)}
+.d-idle{background:var(--faint)}.d-running{background:var(--cyan)}
+footer{border-top:1px solid var(--bd);background:var(--bg2);padding:9px 10px calc(9px + env(safe-area-inset-bottom))}
+.bar{display:flex;gap:7px;align-items:stretch}
+.bar input{flex:1;min-width:0;background:var(--bg);color:var(--tx);border:1px solid var(--bd2);border-radius:9px;padding:0 13px;font-size:16px;font-family:var(--mono);min-height:50px}
+.bar button{border:none;border-radius:9px;min-height:50px;padding:0 16px;font-size:14px;font-weight:700;background:var(--gold);color:var(--ongold)}
+.mic{background:var(--panel);border:1px solid var(--bd2);color:var(--tx);font-size:19px;min-width:56px}
 .mic.rec{background:var(--red);border-color:var(--red);color:#fff}
-.err{color:var(--yellow);font-size:11px;padding:4px 2px 0;min-height:15px}
-.sp{margin-top:2px}
-.sp button{width:100%;background:transparent;border:1px dashed var(--bd);color:var(--mut);border-radius:10px;padding:8px;font-size:13px;font-weight:600}
+.err{font-family:var(--mono);color:var(--gold2);font-size:11px;padding:5px 3px 0;min-height:16px}
+.sp button{width:100%;background:transparent;border:1px dashed var(--bd2);color:var(--mut);border-radius:9px;min-height:44px;font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;font-family:var(--mono)}
 #spawn{display:none;margin-top:8px}
-#spawn select,#spawn input,#spawn textarea{width:100%;margin-bottom:6px;background:var(--bg);color:var(--tx);border:1px solid var(--bd);border-radius:10px;padding:10px;font-size:16px}
-#spawn .go{width:100%;background:var(--acc);color:#fff;border:none;border-radius:10px;padding:12px;font-size:15px;font-weight:600}
+#spawn select,#spawn input,#spawn textarea{width:100%;margin-bottom:7px;background:var(--bg);color:var(--tx);border:1px solid var(--bd2);border-radius:9px;padding:12px;font-size:16px;font-family:var(--mono)}
+#spawn .go{width:100%;background:var(--gold);color:var(--ongold);border:none;border-radius:9px;min-height:50px;font-size:14px;font-weight:700}
 </style></head><body>
 <header id="hd"></header>
 <main><div id="focus"></div><div class="sats" id="sats"></div></main>
@@ -171,11 +183,21 @@ function render(d){
   var c=centered(d),fh;
   if(TARGET==='kane'&&d.kane){fh='<div class="focus"><div class="fname">Kane</div><div class="fmeta">overseer · talking to him</div><pre>'+esc(d.kane.output||'')+'</pre></div>';}
   else if(c){fh='<div class="focus"><div class="fname">'+esc(c.name)+'</div><div class="fmeta">'+esc(c.repo)+' · '+esc(c.branch)+'</div><pre>'+esc(c.output||'')+'</pre></div>';}
-  else{fh='<div class="focus"><div class="fmeta">nothing focused — tap a terminal below</div></div>';}
+  else{fh='<div class="focus"><div class="empty">nothing focused — tap a session below</div></div>';}
   document.getElementById('focus').innerHTML=fh;
-  document.getElementById('sats').innerHTML=(d.terminals||[]).filter(function(t){return t.id!==d.centeredId;}).map(function(t){
-    return '<button class="sat" onclick="focusTile('+t.id+')"><span class="sn">'+esc(t.name)+'</span><span class="dot d-'+esc(t.state)+'"></span></button>';
-  }).join('');
+  // Two groups, because a hidden session is alive but OFF the stage on the desk. Mixing them
+  // into one list is what made the page unreadable: you could not tell what you were looking at.
+  var stage=[],hid=[],ts=(d.terminals||[]);
+  for(var i=0;i<ts.length;i++){if(ts[i].id===d.centeredId)continue;(ts[i].hidden?hid:stage).push(ts[i]);}
+  var out='';
+  if(stage.length)out+='<div class="lbl">on stage</div><div class="sats">'+stage.map(sat).join('')+'</div>';
+  if(hid.length)out+='<div class="lbl">hidden · tap to bring back</div><div class="sats">'+hid.map(sat).join('')+'</div>';
+  if(!stage.length&&!hid.length)out='<div class="empty">no other sessions</div>';
+  document.getElementById('sats').innerHTML=out;
+}
+function sat(t){
+  return '<button class="sat'+(t.hidden?' hid':'')+'" onclick="focusTile('+t.id+')">'+
+    '<span class="dot d-'+esc(t.state)+'"></span><span class="sn">'+esc(t.name)+'</span></button>';
 }
 document.getElementById('send').addEventListener('click',send);
 document.getElementById('spbtn').addEventListener('click',toggleSpawn);

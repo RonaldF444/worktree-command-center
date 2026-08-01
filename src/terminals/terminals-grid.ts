@@ -31,7 +31,7 @@ export interface RepoConfig { name: string; path: string; remote?: string; group
 /** One tile as the phone sees it. `output` rides along ONLY for the focused tile — the phone
  *  mirrors a screen you are sitting in front of, so satellites need a name and a state dot and
  *  nothing else. That keeps the 2s poll roughly 12× smaller than sending every tile's tail. */
-export interface RemoteTerminal { id: number; name: string; repo: string; branch: string; state: string; remoteOn: boolean; output?: string; }
+export interface RemoteTerminal { id: number; name: string; repo: string; branch: string; state: string; remoteOn: boolean; hidden: boolean; output?: string; }
 
 /** The floor as the phone sees it. Kane is NOT in `terminals`: on the desk he is a side console,
  *  not a tile on the stage, and the phone renders him as a pill. He is still a valid input
@@ -625,9 +625,13 @@ export class TerminalsGrid {
 	floorState(): FloorSnapshot {
 		const centeredId = this.centeredId;
 		const tail = (s: string): string => s.split('\n').slice(-12).join('\n');
+		// allSessions() spans the stage AND the hidden list; the phone must be able to tell them
+		// apart, because a hidden session is alive but off-stage here and the whole page is a
+		// mirror of what is on the stage.
+		const hiddenIds = new Set(this.hidden.map((t) => t.tileId));
 		const terminals: RemoteTerminal[] = (this.allSessions().filter((t) => !t.isJournal) as TerminalTile[]).map((t) => ({
 			id: t.tileId, name: t.name, repo: this.repoNameFor(t), branch: t.branch,
-			state: this.tileState(t), remoteOn: t.isRemoteOn,
+			state: this.tileState(t), remoteOn: t.isRemoteOn, hidden: hiddenIds.has(t.tileId),
 			...(t.tileId === centeredId ? { output: tail(t.recentOutput()) } : {}),
 		}));
 		// Kane's tail always rides along, even though the phone only shows it while he is the
@@ -649,6 +653,10 @@ export class TerminalsGrid {
 	 *  tile and holds the spotlight — a choice you made deliberately from your phone must not be
 	 *  yanked back by the auto-decider a second later. */
 	centerById(id: number): void {
+		// A hidden session is alive but off-stage. Tapping it on the phone means "bring this
+		// back" — the same thing resurfacing it from the Coordination panel does, which already
+		// centres and focuses it.
+		if (this.hidden.some((t) => t.tileId === id)) { this.showTile(id); return; }
 		if (!this.tiles.some((t) => t.tileId === id)) return;
 		this.handleClick(id);
 	}
