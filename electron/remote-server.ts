@@ -96,9 +96,9 @@ function esc(s){return (s||'').replace(/[&<>]/g,function(c){return{'&':'&amp;','
 function rc(id){post({type:'remote',id:id});}
 var OPEN={},DRAFT={},SRC=window.webkitSpeechRecognition||window.SpeechRecognition;
 var CAN_MIC=!!SRC&&window.isSecureContext;
-var rec=null;
+var rec=null,LAST=null;
 function anyOpen(){for(var k in OPEN){if(OPEN[k])return true;}return false;}
-function talk(id){OPEN[id]=!OPEN[id];poll();}
+function talk(id){OPEN[id]=!OPEN[id];if(LAST)render(LAST);}
 function draft(id){DRAFT[id]=document.getElementById('f'+id).value;}
 function send(id){
   var f=document.getElementById('f'+id),v=(f.value||'').trim();
@@ -142,6 +142,7 @@ function render(d){
   }).join('');
 }
 function poll(){fetch('/api/floor?t='+T).then(function(r){return r.json();}).then(function(d){
+  LAST=d;
   document.getElementById('status').textContent=(d.terminals||[]).length+' terminals';
   // Re-rendering the list would wipe a half-dictated field, drop focus, and orphan a live
   // recognition session — so while a compose row is open, only the status line updates.
