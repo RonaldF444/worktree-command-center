@@ -77,19 +77,16 @@ const MOBILE_HTML = `<!doctype html><html><head><meta charset="utf-8"/>
 *{box-sizing:border-box}
 html,body{height:100%}
 body{margin:0;background:var(--bg);color:var(--tx);font-family:system-ui,-apple-system,'Segoe UI',sans-serif;-webkit-text-size-adjust:100%;display:flex;flex-direction:column;overscroll-behavior:none}
-header{display:flex;align-items:flex-start;gap:8px;padding:9px 10px;border-bottom:1px solid var(--bd);background:var(--bg2)}
-#ws{display:flex;flex-wrap:wrap;gap:5px;flex:1;min-width:0}
-.ws{font-family:var(--mono);padding:6px 9px;border-radius:7px;font-size:11px;font-weight:600;color:var(--mut);background:transparent;border:1px solid transparent}
+header{display:flex;align-items:center;gap:6px;padding:8px 9px;border-bottom:1px solid var(--bd);background:var(--bg2)}
+#ws{display:flex;gap:5px;flex:1;min-width:0;overflow-x:auto;-webkit-overflow-scrolling:touch}
+.ws{flex:none;font-family:var(--mono);padding:6px 9px;border-radius:7px;font-size:11px;font-weight:600;color:var(--mut);background:transparent;border:1px solid transparent}
 .ws.on{color:var(--gold2);background:var(--panel);border-color:var(--bd2)}
-.kane{flex:none;font-family:var(--mono);padding:7px 13px;border-radius:7px;font-size:11px;font-weight:700;background:var(--panel);border:1px solid var(--bd2);color:var(--mut)}
-.kane.on{background:var(--gold);border-color:var(--gold2);color:var(--ongold)}
-/* The carousel: neighbours peek in at both edges so it is obvious which way to swipe. */
-.strip{position:relative;flex:1;display:flex;gap:6px;padding:10px 8px;min-height:0}
-.peek{flex:0 0 15%;min-width:44px;border:1px solid var(--bd);border-radius:9px;background:var(--panel);color:var(--mut);padding:9px 3px;overflow:hidden;display:flex;flex-direction:column;align-items:center;gap:7px}
-.peek:active{background:var(--panel2)}
-.peek.none{opacity:0;pointer-events:none}
-.pn{font-family:var(--mono);font-size:10.5px;font-weight:600;writing-mode:vertical-rl;text-orientation:mixed;overflow:hidden;max-height:100%;letter-spacing:.02em}
-.stage{position:relative;flex:1;min-width:0;border:2px solid var(--gold);border-radius:11px;background:var(--panel);padding:12px 13px 74px;overflow:hidden;box-shadow:0 8px 26px rgba(0,0,0,.5)}
+.pill{flex:none;font-family:var(--mono);padding:7px 11px;border-radius:7px;font-size:11px;font-weight:700;background:var(--panel);border:1px solid var(--bd2);color:var(--mut)}
+.pill.on{background:var(--gold);border-color:var(--gold2);color:var(--ongold)}
+/* The spotlight: a fixed slice of the screen so the satellite list below can never squeeze it
+   flat — that collapse is what threw the mic up over the header. */
+.stagewrap{position:relative;flex:none;height:44vh;padding:9px 9px 0}
+.stage{position:relative;height:100%;border:2px solid var(--gold);border-radius:11px;background:var(--panel);padding:12px 13px 76px;overflow:hidden;box-shadow:0 8px 26px rgba(0,0,0,.5)}
 .sname{font-family:var(--mono);font-weight:700;font-size:14px;word-break:break-word}
 .smeta{font-family:var(--mono);color:var(--faint);font-size:10.5px;margin:3px 0 9px}
 pre{margin:0;font-family:var(--mono);font-size:10.5px;line-height:1.55;color:var(--mut);white-space:pre-wrap;word-break:break-word;height:100%;overflow:auto;border-top:1px solid var(--bd);padding-top:8px}
@@ -100,11 +97,20 @@ pre{margin:0;font-family:var(--mono);font-size:10.5px;line-height:1.55;color:var
 .d-idle{background:var(--faint)}.d-running{background:var(--cyan)}
 /* The mic is the hero control: a thumb-sized circle on the focused card. It is a STABLE node
    parked over the stage, never inside render()'s innerHTML, so its listeners survive polls. */
-#mic{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);width:62px;height:62px;border-radius:50%;font-size:25px;background:var(--panel2);border:2px solid var(--bd2);color:var(--tx);box-shadow:0 5px 16px rgba(0,0,0,.5);z-index:3}
+#mic{position:absolute;left:50%;bottom:22px;transform:translateX(-50%);width:60px;height:60px;border-radius:50%;font-size:24px;background:var(--panel2);border:2px solid var(--bd2);color:var(--tx);box-shadow:0 5px 16px rgba(0,0,0,.5);z-index:3}
 #mic.rec{background:var(--red);border-color:var(--red);color:#fff;box-shadow:0 0 0 8px rgba(240,98,58,.18)}
 #mic.off{opacity:.3}
-#tray{display:flex;flex-wrap:wrap;gap:6px;padding:0 10px 8px}
-.hchip{font-family:var(--mono);font-size:10px;padding:6px 9px;border-radius:7px;border:1px dashed var(--bd2);background:transparent;color:var(--faint)}
+/* Every other on-stage session, exactly like the satellites around the desk's centred tile.
+   Scrolls, so ten sessions look the same as three. */
+#others{flex:1;min-height:0;overflow-y:auto;display:flex;flex-wrap:wrap;align-content:flex-start;gap:6px;padding:9px}
+.oth{display:flex;align-items:center;gap:8px;flex:1 1 calc(50% - 3px);min-width:0;min-height:44px;border:1px solid var(--bd);border-radius:8px;background:var(--panel);color:var(--tx);padding:8px 10px;text-align:left}
+.oth:active{background:var(--panel2);border-color:var(--bd2)}
+.on{font-family:var(--mono);font-size:10.5px;font-weight:600;line-height:1.25;overflow:hidden;max-height:2.5em}
+/* Hidden sessions live behind the coordination pill — off the stage here, off the stage there. */
+#coord{display:none;flex:1;min-height:0;overflow-y:auto;padding:9px;flex-direction:column;gap:6px}
+#coord.open{display:flex}
+.hchip{font-family:var(--mono);font-size:10.5px;padding:11px 11px;border-radius:8px;border:1px dashed var(--bd2);background:transparent;color:var(--mut);text-align:left}
+.chead{font-size:10px;font-weight:700;letter-spacing:.13em;text-transform:uppercase;color:var(--faint);padding:0 2px 2px}
 footer{border-top:1px solid var(--bd);background:var(--bg2);padding:8px 10px calc(8px + env(safe-area-inset-bottom))}
 .bar{display:flex;gap:6px}
 .bar input{flex:1;min-width:0;background:var(--bg);color:var(--tx);border:1px solid var(--bd2);border-radius:9px;padding:0 12px;font-size:16px;font-family:var(--mono);min-height:46px}
@@ -115,14 +121,13 @@ footer{border-top:1px solid var(--bd);background:var(--bg2);padding:8px 10px cal
 #spawn select,#spawn input,#spawn textarea{width:100%;margin-bottom:6px;background:var(--bg);color:var(--tx);border:1px solid var(--bd2);border-radius:9px;padding:11px;font-size:16px;font-family:var(--mono)}
 #spawn .go{width:100%;background:var(--gold);color:var(--ongold);border:none;border-radius:9px;min-height:46px;font-size:13px;font-weight:700}
 </style></head><body>
-<header><div id="ws"></div><button class="kane" id="kanebtn" style="display:none">kane</button></header>
-<div class="strip" id="strip">
-<button class="peek" id="prev"></button>
+<header><div id="ws"></div><button class="pill" id="coordbtn" style="display:none">coord</button><button class="pill" id="kanebtn" style="display:none">kane</button></header>
+<div class="stagewrap" id="strip">
 <section class="stage" id="stage"></section>
-<button class="peek" id="next"></button>
 <button id="mic">🎤</button>
 </div>
-<div id="tray"></div>
+<div id="others"></div>
+<div id="coord"></div>
 <footer>
 <div class="bar"><input id="f" placeholder="talk…"/><button id="send">Send</button></div>
 <div class="err" id="err"></div>
@@ -203,15 +208,16 @@ function spawn(){
   }).catch(function(){err('spawn failed — offline?');});
 }
 var repoFilled=false;
-function peek(el,t){
-  if(!t){el.className='peek none';el.innerHTML='';el.onclick=null;return;}
-  el.className='peek';
-  el.innerHTML='<span class="dot d-'+esc(t.state)+'"></span><span class="pn">'+esc(t.name)+'</span>';
-  el.onclick=function(){focusTile(t.id);};
+var COORD=false;
+function coord(){
+  COORD=!COORD;
+  document.getElementById('coord').className=COORD?'open':'';
+  document.getElementById('others').style.display=COORD?'none':'';
+  if(LAST)render(LAST);
 }
-// Rewrites the header, the two peeks, the stage and the tray. #mic, #f, #send and the spawn
-// controls are deliberately OUTSIDE all of them, so a poll can never wipe what you are typing
-// or detach a listener mid-gesture.
+// Rewrites the header, the stage, the satellite list and the coordination panel. #mic, #f,
+// #send and the spawn controls are deliberately OUTSIDE all of them, so a poll can never wipe
+// what you are typing or detach a listener mid-gesture.
 function render(d){
   if(!repoFilled&&(d.repos||[]).length){document.getElementById('repo').innerHTML=d.repos.map(function(r){return '<option>'+esc(r)+'</option>';}).join('');repoFilled=true;}
   document.getElementById('ws').innerHTML=(d.workspaces||[]).map(function(w){
@@ -219,28 +225,36 @@ function render(d){
   }).join('');
   var kb=document.getElementById('kanebtn');
   kb.style.display=d.kane?'':'none';
-  kb.className='kane'+(TARGET==='kane'?' on':'');
-  var l=stageList(d),i=idxOf(l,d.centeredId),c=i<0?null:l[i];
+  kb.className='pill'+(TARGET==='kane'?' on':'');
+  var l=stageList(d),c=null,i=idxOf(l,d.centeredId);
+  if(i>=0)c=l[i];
   if(TARGET==='kane'&&d.kane){
     document.getElementById('stage').innerHTML='<div class="sname">Kane</div><div class="smeta">overseer · talking to him</div><pre>'+esc(d.kane.output||'')+'</pre>';
   }else if(c){
     document.getElementById('stage').innerHTML='<div class="sname">'+esc(c.name)+'</div><div class="smeta">'+esc(c.repo)+' · '+esc(c.branch)+'</div><pre>'+esc(c.output||'')+'</pre>';
   }else{
-    document.getElementById('stage').innerHTML='<div class="empty">nothing focused — tap a neighbour or spawn one</div>';
+    document.getElementById('stage').innerHTML='<div class="empty">nothing focused — tap a session below</div>';
   }
-  var n=l.length;
-  peek(document.getElementById('prev'),n>1&&i>=0?l[(i-1+n)%n]:(n&&i<0?l[n-1]:null));
-  peek(document.getElementById('next'),n>1&&i>=0?l[(i+1)%n]:(n&&i<0?l[0]:null));
+  // EVERY other on-stage session, not just the neighbours: ten of them look like three, the
+  // list just scrolls. This is the desk's centred tile plus its satellites, shrunk.
+  document.getElementById('others').innerHTML=l.filter(function(t){return t.id!==d.centeredId;}).map(function(t){
+    return '<button class="oth" onclick="focusTile('+t.id+')"><span class="dot d-'+esc(t.state)+'"></span><span class="on">'+esc(t.name)+'</span></button>';
+  }).join('')||'<div class="empty">no other sessions on stage</div>';
   var hid=[],ts=(d.terminals||[]);
   for(var k=0;k<ts.length;k++){if(ts[k].hidden)hid.push(ts[k]);}
-  document.getElementById('tray').innerHTML=hid.length
-    ?hid.map(function(t){return '<button class="hchip" onclick="focusTile('+t.id+')">hidden · '+esc(t.name)+'</button>';}).join('')
-    :'';
+  var cb=document.getElementById('coordbtn');
+  cb.style.display=hid.length?'':'none';
+  cb.className='pill'+(COORD?' on':'');
+  cb.textContent='coord '+hid.length;
+  document.getElementById('coord').innerHTML=hid.length
+    ?'<div class="chead">hidden · tap to bring back on stage</div>'+hid.map(function(t){return '<button class="hchip" onclick="focusTile('+t.id+')">'+esc(t.name)+'</button>';}).join('')
+    :'<div class="empty">nothing hidden</div>';
 }
 document.getElementById('send').addEventListener('click',send);
 document.getElementById('spbtn').addEventListener('click',toggleSpawn);
 document.getElementById('spgo').addEventListener('click',spawn);
 document.getElementById('kanebtn').addEventListener('click',kane);
+document.getElementById('coordbtn').addEventListener('click',coord);
 var mb=document.getElementById('mic');
 if(!CAN_MIC){
   mb.className='off';
