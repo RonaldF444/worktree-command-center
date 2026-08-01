@@ -4,7 +4,7 @@
 export type RemoteAction =
 	| { type: 'remote'; id: number }
 	| { type: 'spawn'; repo: string; base: string | null; task: string }
-	| { type: 'input'; id: number; text: string };
+	| { type: 'input'; id: number; text: string; name: string };
 
 /** Longest message accepted from the phone. Speech transcripts are short; the HTTP body cap
  *  (100KB) is far too generous for something that gets typed into an agent. */
@@ -25,11 +25,17 @@ export function parseRemoteAction(raw: unknown): RemoteAction | null {
 	}
 	if (a.type === 'input') {
 		if (!isTileId(a.id) || typeof a.text !== 'string') return null;
+		// Tile ids are per-workspace (each grid's counter starts at 1), and the phone always
+		// targets the currently-active workspace. A stale phone list (switched workspace since
+		// the last poll) could otherwise deliver text into an unrelated session that executes
+		// it with no confirmation. Requiring the card's name here — checked again against the
+		// live tile in sendToId — is the fail-safe: reject rather than risk the wrong agent.
+		if (typeof a.name !== 'string' || !a.name.trim()) return null;
 		// A dictated "new line" must stay ONE message: a CR would submit it early, and a LF
 		// would split it. Collapse both to spaces before it can reach the PTY.
 		const text = a.text.replace(/[\r\n]+/g, ' ').trim();
 		if (!text || text.length > MAX_INPUT) return null;
-		return { type: 'input', id: a.id, text };
+		return { type: 'input', id: a.id, text, name: a.name.trim() };
 	}
 	return null;
 }

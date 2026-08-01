@@ -19,7 +19,7 @@ A standalone desktop app (Electron). Windows-first.
 - **Park & reopen** — unfinished work is auto-saved as a recoverable commit when things close; one click brings it back. Minimized terminals keep their sessions alive and resurface from the Coordination panel or the ⚠ attention badge.
 - **Workspaces** — independent floors of terminals (Alt+↑/↓ to cycle), each with its own repos and coordination dir.
 - **Usage battery** — a topbar meter for your Claude limits: session, week, and Fable week, with a click-open detail popover, manual ⟳ (a fresh probe session every time), and a 60 s auto-refresh toggle.
-- **Phone floor view** — a token-guarded HTTP view of the floor (e.g. over Tailscale) to check terminals and fire off spawns from your phone.
+- **Phone floor view** — a token-guarded HTTP view of the floor (e.g. over Tailscale) to check terminals, fire off spawns, and talk (type or dictate) directly into a live session from your phone; voice input needs an HTTPS URL, so run `tailscale serve` once.
 - **Journal tiles** — dictate/type a journal entry in a tile; optionally convert it into a Linear issue via your configured team.
 - **Agent chat** — pull two or more terminals into a group chat you can message (hidden by default; see `terminals-grid.ts`).
 

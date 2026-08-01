@@ -28,7 +28,7 @@ declare global {
 			setConfig(c: any): Promise<boolean>;
 			addFolder(): Promise<string | null>;
 			pushFloorState(s: unknown): void;
-			onRemoteAction(cb: (a: { type: string; id?: number; repo?: string; base?: string | null; task?: string; text?: string }) => void): void;
+			onRemoteAction(cb: (a: { type: string; id?: number; repo?: string; base?: string | null; task?: string; text?: string; name?: string }) => void): void;
 			remoteInfo(): Promise<{ token: string; port: number; urls: string[]; httpsUrl: string | null }>;
 			onShellDigit(cb: (n: number) => void): void;
 		};
@@ -271,28 +271,52 @@ async function main(): Promise<void> {
 		window.wcc.onRemoteAction((a) => {
 			if (a.type === 'remote' && typeof a.id === 'number') activeGrid.toggleRemoteById(a.id);
 			else if (a.type === 'spawn' && a.repo && a.task) void activeGrid.spawnFromName(a.repo, a.base ?? null, a.task);
-			else if (a.type === 'input' && typeof a.id === 'number' && a.text) activeGrid.sendToId(a.id, a.text);
+			else if (a.type === 'input' && typeof a.id === 'number' && a.text && a.name) activeGrid.sendToId(a.id, a.text, a.name);
 		});
 
 		// 📱 Phone button → panel with the Tailscale URLs to open on your phone.
+		// The panel (and its Close handler) is built SYNCHRONOUSLY, before the remoteInfo()
+		// await: remote:info now awaits two `tailscale` subprocess spawns (up to ~2s), so a
+		// second tap before the first resolves used to find `phonePanel` still null and build a
+		// second, permanently-orphaned panel (the first's Close handler only knew about itself).
+		// Assigning phonePanel here closes that re-entrancy window, and as a bonus removes the
+		// dead-air gap: the panel + Close button appear instantly, with the voice/URL content
+		// filled in once remote:info resolves. `phonePanel !== panel` in the callbacks below
+		// guards against a stale resolution touching a panel that was closed/reopened meanwhile.
 		let phonePanel: HTMLElement | null = null;
 		phoneBtn.addEventListener('click', () => {
 			if (phonePanel) { phonePanel.remove(); phonePanel = null; return; }
+			const panel = appEl.createDiv({ cls: 'wcc-phone-panel' });
+			phonePanel = panel;
+			const btnRect = phoneBtn.getBoundingClientRect();
+			panel.style.top = `${Math.round(btnRect.bottom + 6)}px`;
+			panel.createDiv({ cls: 'wcc-phone-h', text: '📱 Phone floor view' });
+			const voiceBox = panel.createDiv();
+			voiceBox.createDiv({ cls: 'wcc-phone-sub', text: 'Checking voice availability…' });
+			panel.createDiv({ cls: 'wcc-phone-sub', text: 'Open one of these on your phone (same Tailscale network):' });
+			const urlsBox = panel.createDiv();
+			urlsBox.createDiv({ cls: 'wcc-phone-sub', text: 'Loading…' });
+			const close = panel.createEl('button', { cls: 'wcc-phone-close', text: 'Close' });
+			close.addEventListener('click', () => { phonePanel?.remove(); phonePanel = null; });
 			void window.wcc.remoteInfo().then((info) => {
-				phonePanel = appEl.createDiv({ cls: 'wcc-phone-panel' });
-				const btnRect = phoneBtn.getBoundingClientRect();
-				phonePanel.style.top = `${Math.round(btnRect.bottom + 6)}px`;
-				phonePanel.createDiv({ cls: 'wcc-phone-h', text: '📱 Phone floor view' });
+				if (phonePanel !== panel) return; // panel was closed (or reopened) before this resolved
+				voiceBox.empty();
 				if (info.httpsUrl) {
-					phonePanel.createDiv({ cls: 'wcc-phone-sub', text: '🎤 Voice-capable (HTTPS) — open this one to talk:' });
-					phonePanel.createEl('div', { cls: 'wcc-phone-url', text: info.httpsUrl });
+					voiceBox.createDiv({ cls: 'wcc-phone-sub', text: '🎤 Voice-capable (HTTPS) — open this one to talk:' });
+					voiceBox.createEl('div', { cls: 'wcc-phone-url', text: info.httpsUrl });
 				} else {
-					phonePanel.createDiv({ cls: 'wcc-phone-sub', text: 'For voice, run once:  tailscale serve --bg 7420' });
+					voiceBox.createDiv({ cls: 'wcc-phone-sub', text: 'For voice, run once:  tailscale serve --bg 7420' });
 				}
-				phonePanel.createDiv({ cls: 'wcc-phone-sub', text: 'Open one of these on your phone (same Tailscale network):' });
-				for (const u of info.urls) phonePanel.createEl('div', { cls: 'wcc-phone-url', text: u });
-				const close = phonePanel.createEl('button', { cls: 'wcc-phone-close', text: 'Close' });
-				close.addEventListener('click', () => { phonePanel?.remove(); phonePanel = null; });
+				urlsBox.empty();
+				for (const u of info.urls) urlsBox.createEl('div', { cls: 'wcc-phone-url', text: u });
+			}).catch(() => {
+				// Belt-and-braces: main.ts degrades tailscale failures to null internally, but this
+				// still guards against remote:info rejecting for some other reason (e.g. IPC itself
+				// failing) — without it the panel would sit on "Loading…" forever, silently.
+				if (phonePanel !== panel) return;
+				voiceBox.empty();
+				urlsBox.empty();
+				urlsBox.createDiv({ cls: 'wcc-phone-sub', text: 'Could not reach the phone server.' });
 			});
 		});
 

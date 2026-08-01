@@ -92,9 +92,9 @@ pre{margin:0;padding:8px 12px;font-size:11.5px;color:#9fb8a8;white-space:pre-wra
 <script>
 var T=new URLSearchParams(location.search).get('t');
 function post(a){return fetch('/api/action?t='+T,{method:'POST',body:JSON.stringify(a)});}
-function esc(s){return (s||'').replace(/[&<>]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;'}[c];});}
+function esc(s){return (s||'').replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
 function rc(id){post({type:'remote',id:id});}
-var OPEN={},DRAFT={},SRC=window.webkitSpeechRecognition||window.SpeechRecognition;
+var OPEN={},DRAFT={},NAME={},SRC=window.webkitSpeechRecognition||window.SpeechRecognition;
 var CAN_MIC=!!SRC&&window.isSecureContext;
 var rec=null,LAST=null;
 function anyOpen(){for(var k in OPEN){if(OPEN[k])return true;}return false;}
@@ -103,11 +103,15 @@ function draft(id){DRAFT[id]=document.getElementById('f'+id).value;}
 function send(id){
   var f=document.getElementById('f'+id),v=(f.value||'').trim();
   if(!v)return;
-  post({type:'input',id:id,text:v}).then(function(){f.value='';DRAFT[id]='';});
+  post({type:'input',id:id,text:v,name:NAME[id]||''}).then(function(r){
+    if(!r.ok){serr(id,'send failed ('+r.status+')');return;}
+    f.value='';DRAFT[id]='';serr(id,'sent');
+  }).catch(function(){serr(id,'send failed — offline?');});
 }
 function serr(id,m){var e=document.getElementById('e'+id);if(e)e.textContent=m||'';}
 function micDown(id){
   if(!CAN_MIC)return;
+  if(rec){try{rec.stop();}catch(_e){}rec=null;}
   var f=document.getElementById('f'+id),base=f.value?f.value+' ':'';
   serr(id,'');
   rec=new SRC();rec.lang='en-US';rec.interimResults=true;rec.continuous=false;
@@ -126,9 +130,15 @@ function micUp(id){
 }
 function spawn(){var r=document.getElementById('repo').value,b=document.getElementById('base').value.trim(),t=document.getElementById('task').value.trim();if(!t){alert('task?');return;}post({type:'spawn',repo:r,base:b||null,task:t}).then(function(){document.getElementById('task').value='';});}
 var repoFilled=false;
+// Rebuilds #list from scratch — this wipes any input's cursor/focus, and if a mic recognizer
+// is mid-utterance in a field that gets replaced, it orphans the recognizer (still listening,
+// still writing, into a detached <input> nobody sees). That is why poll() only calls this when
+// anyOpen() is false, and why talk() — which itself changes what #list must contain — is the
+// only other legitimate caller. Do not add a new call site without the same guard.
 function render(d){
   if(!repoFilled&&(d.repos||[]).length){var s=document.getElementById('repo');s.innerHTML=d.repos.map(function(r){return '<option>'+esc(r)+'</option>';}).join('');repoFilled=true;}
   document.getElementById('list').innerHTML=(d.terminals||[]).map(function(t){
+    NAME[t.id]=t.name;
     return '<div class="card"><div class="chead"><span class="nm">'+esc(t.name)+'</span>'+
       '<span class="meta">'+esc(t.repo)+' · '+esc(t.branch)+'</span>'+
       '<span class="badge s-'+esc(t.state)+'">'+esc(t.state)+'</span></div>'+

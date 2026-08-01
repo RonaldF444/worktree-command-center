@@ -633,10 +633,19 @@ export class TerminalsGrid {
 	/** Phone: type a line into a terminal. Goes through the tile's own sendLine, which writes
 	 *  the text and the Enter on SEPARATE ticks — bundling "text\r" into one PTY write makes
 	 *  Claude treat the newline as pasted, so the message lands in the box unsent. A tile that
-	 *  closed since the phone's last poll is silently ignored. */
-	sendToId(id: number, text: string): void {
+	 *  closed since the phone's last poll is silently ignored.
+	 *  `name` must match the found tile's current name, or the message is dropped. Tile ids are
+	 *  scoped to THIS grid (each workspace's counter starts at 1 independently), but the phone
+	 *  always reads and writes `activeGrid` — if the desk user switches workspaces after the
+	 *  phone's last poll, the phone's id N may now resolve to a completely different session
+	 *  here. These terminals run with --dangerously-skip-permissions, so a wrong-session delivery
+	 *  executes with no confirmation step. Dropping on a name mismatch is the fail-safe
+	 *  direction versus guessing; a terminal rename between poll and send will also drop a
+	 *  queued message, which is an acceptable false-negative for the safety it buys. */
+	sendToId(id: number, text: string, name: string): void {
 		const tile = [...this.tiles, ...this.hidden].find((t) => t.tileId === id);
 		if (!tile || tile.isJournal) return;
+		if ((tile as TerminalTile).name !== name) return;
 		(tile as TerminalTile).sendLine(text);
 	}
 

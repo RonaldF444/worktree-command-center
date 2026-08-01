@@ -185,9 +185,13 @@ function runViaWorker(command: string, args: string[], timeoutMs: number): Promi
  *  panel open rather than once at startup, because Tailscale often finishes starting after
  *  WCC does. */
 async function tailscaleVoiceDnsName(port: number): Promise<string | null> {
+	// runViaWorker can reject (not just resolve null) if ensureCmdRunner()'s `new Worker(...)`
+	// throws synchronously inside the executor — e.g. worker_threads unavailable/misconfigured.
+	// That would otherwise reject this Promise.all, then the whole `remote:info` handler below,
+	// wiping out the plain http:// URLs too. Degrade to null instead: this helper is best-effort.
 	const [statusOut, serveOut] = await Promise.all([
-		runViaWorker('tailscale', ['status', '--json'], 2000),
-		runViaWorker('tailscale', ['serve', 'status', '--json'], 2000),
+		runViaWorker('tailscale', ['status', '--json'], 2000).catch(() => null),
+		runViaWorker('tailscale', ['serve', 'status', '--json'], 2000).catch(() => null),
 	]);
 	if (!statusOut || !serveOut) return null;
 	try {
