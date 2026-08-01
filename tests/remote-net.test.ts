@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isTailscaleIp, pickHosts, accessUrls, httpsUrlFor } from '../electron/remote-net';
+import { isTailscaleIp, pickHosts, accessUrls, httpsUrlFor, hasServeHandlerFor } from '../electron/remote-net';
 
 describe('isTailscaleIp', () => {
   it('detects the 100.64.0.0/10 range', () => {
@@ -45,5 +45,33 @@ describe('httpsUrlFor', () => {
     expect(httpsUrlFor(null, 'abc123')).toBeNull();
     expect(httpsUrlFor(undefined, 'abc123')).toBeNull();
     expect(httpsUrlFor('   ', 'abc123')).toBeNull();
+  });
+});
+
+describe('hasServeHandlerFor', () => {
+  it('finds an active proxy handler for the port', () => {
+    const status = {
+      Web: {
+        'desk.tail1234.ts.net:443': {
+          Handlers: { '/': { Proxy: 'http://127.0.0.1:7420' } },
+        },
+      },
+    };
+    expect(hasServeHandlerFor(status, 7420)).toBe(true);
+  });
+  it('returns false when serve is configured for a different port', () => {
+    const status = {
+      Web: {
+        'desk.tail1234.ts.net:443': {
+          Handlers: { '/': { Proxy: 'http://127.0.0.1:3000' } },
+        },
+      },
+    };
+    expect(hasServeHandlerFor(status, 7420)).toBe(false);
+  });
+  it('returns false when serve has never been configured', () => {
+    expect(hasServeHandlerFor({}, 7420)).toBe(false);
+    expect(hasServeHandlerFor(null, 7420)).toBe(false);
+    expect(hasServeHandlerFor(undefined, 7420)).toBe(false);
   });
 });

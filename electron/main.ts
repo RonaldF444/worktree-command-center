@@ -2,9 +2,8 @@ import { app, BrowserWindow, ipcMain, dialog, clipboard, shell } from 'electron'
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
-import { execFileSync } from 'child_process';
 import { startRemoteServer } from './remote-server';
-import { pickHosts, accessUrls, httpsUrlFor } from './remote-net';
+import { pickHosts, accessUrls, httpsUrlFor, hasServeHandlerFor } from './remote-net';
 import { Worker } from 'worker_threads';
 
 const REMOTE_PORT = 7420;
@@ -21,18 +20,6 @@ app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion');
 // protocol on localhost only, so a CPU profile of the renderer can be captured from
 // outside while the lag is reproducing. Loopback-bound — not reachable off-machine.
 app.commandLine.appendSwitch('remote-debugging-port', '9223');
-
-/** This machine's MagicDNS name, for the HTTPS (voice-capable) phone URL. Best-effort: no
- *  Tailscale installed, not logged in, or a daemon still starting all yield null and the
- *  panel falls back to the setup hint. Read on each panel open rather than once at startup,
- *  because Tailscale often finishes starting after WCC does. */
-function tailscaleDnsName(): string | null {
-	try {
-		const out = execFileSync('tailscale', ['status', '--json'], { timeout: 2000, encoding: 'utf8', windowsHide: true });
-		const name = (JSON.parse(out) as { Self?: { DNSName?: string } }).Self?.DNSName;
-		return typeof name === 'string' && name.trim() ? name : null;
-	} catch { return null; }
-}
 
 function createWindow(): void {
 	const sidecarDir = app.isPackaged
@@ -112,11 +99,11 @@ function createWindow(): void {
 
 	// Phone floor view: HTTP server (Tailscale-reachable) + the access info for the topbar panel.
 	const { token } = startRemoteServer({ port: REMOTE_PORT, getWindow: () => win });
-	ipcMain.handle('remote:info', () => ({
+	ipcMain.handle('remote:info', async () => ({
 		token,
 		port: REMOTE_PORT,
 		urls: accessUrls(pickHosts(os.networkInterfaces(), os.hostname()), REMOTE_PORT, token),
-		httpsUrl: httpsUrlFor(tailscaleDnsName(), token),
+		httpsUrl: httpsUrlFor(await tailscaleVoiceDnsName(REMOTE_PORT), token),
 	}));
 }
 
@@ -173,6 +160,42 @@ ipcMain.handle('cmd:run', (_e, command: unknown, args: unknown, opts: unknown) =
 	cmdPending.set(id, resolve);
 	ensureCmdRunner().postMessage({ id, command: String(command), args: Array.isArray(args) ? args.map(String) : [], opts: opts ?? {} });
 }));
+
+/** Runs a short command on the dedicated worker thread above, same as `cmd:run`, so a slow
+ *  or hung subprocess never blocks main's input pump. Returns stdout, or null on any failure
+ *  (not found, non-zero exit, or timeout) — callers that just want "did this work" don't have
+ *  to unpack the runner's full result shape. */
+function runViaWorker(command: string, args: string[], timeoutMs: number): Promise<string | null> {
+	return new Promise((resolve) => {
+		const id = ++cmdSeq;
+		cmdPending.set(id, (r: unknown) => {
+			const res = r as { stdout: string; code: number | null; timedOut: boolean; error?: string };
+			resolve(!res.error && !res.timedOut && res.code === 0 ? res.stdout : null);
+		});
+		ensureCmdRunner().postMessage({ id, command, args, opts: { timeoutMs } });
+	});
+}
+
+/** This machine's MagicDNS name, but ONLY when `tailscale serve` has an active handler
+ *  proxying to `port` — MagicDNS resolves the moment a device joins a tailnet, independent of
+ *  whether `tailscale serve` was ever run, so the DNS name alone is not proof anything is
+ *  listening on 443 (see hasServeHandlerFor). Best-effort and fully async, via the worker
+ *  thread above: no Tailscale installed, not logged in, a daemon still starting, or serve
+ *  never configured all yield null and the panel falls back to the setup hint. Read on each
+ *  panel open rather than once at startup, because Tailscale often finishes starting after
+ *  WCC does. */
+async function tailscaleVoiceDnsName(port: number): Promise<string | null> {
+	const [statusOut, serveOut] = await Promise.all([
+		runViaWorker('tailscale', ['status', '--json'], 2000),
+		runViaWorker('tailscale', ['serve', 'status', '--json'], 2000),
+	]);
+	if (!statusOut || !serveOut) return null;
+	try {
+		const name = (JSON.parse(statusOut) as { Self?: { DNSName?: string } }).Self?.DNSName;
+		if (typeof name !== 'string' || !name.trim()) return null;
+		return hasServeHandlerFor(JSON.parse(serveOut), port) ? name : null;
+	} catch { return null; }
+}
 
 ipcMain.handle('clipboard:read', () => clipboard.readText());
 ipcMain.handle('clipboard:write', (_e, text: unknown) => { clipboard.writeText(String(text ?? '')); return true; });

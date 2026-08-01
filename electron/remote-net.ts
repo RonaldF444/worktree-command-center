@@ -33,3 +33,19 @@ export function httpsUrlFor(dnsName: string | null | undefined, token: string): 
 	const host = (dnsName ?? '').trim().replace(/\.$/, '');
 	return host ? `https://${host}/?t=${token}` : null;
 }
+
+/** Does `tailscale serve status --json` show an active handler proxying to `port` on this
+ *  machine? MagicDNS resolves the moment a device joins a tailnet, independent of whether
+ *  `tailscale serve` was ever run — so a DNS name alone is not proof anything is listening
+ *  on 443. Without this check the panel could hand out an HTTPS URL that refuses to connect. */
+export function hasServeHandlerFor(serveStatus: unknown, port: number): boolean {
+	const web = (serveStatus as { Web?: Record<string, { Handlers?: Record<string, { Proxy?: string }> }> } | null | undefined)?.Web;
+	if (!web) return false;
+	const suffix = `:${port}`;
+	for (const site of Object.values(web)) {
+		for (const handler of Object.values(site?.Handlers ?? {})) {
+			if (typeof handler?.Proxy === 'string' && handler.Proxy.endsWith(suffix)) return true;
+		}
+	}
+	return false;
+}
