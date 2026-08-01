@@ -68,6 +68,13 @@ header{position:sticky;top:0;background:var(--bg2);padding:12px 14px;border-bott
 pre{margin:0;padding:8px 12px;font-size:11.5px;color:#9fb8a8;white-space:pre-wrap;word-break:break-word;max-height:120px;overflow:auto;border-top:1px solid var(--bd)}
 .rc{width:100%;border:none;border-top:1px solid var(--bd);background:transparent;color:var(--cyan);padding:11px;font-size:14px;font-weight:600;cursor:pointer}
 .rc.on{color:var(--green)}
+.row{display:flex;gap:6px;padding:8px 12px;border-top:1px solid var(--bd)}
+.row input{flex:1;min-width:0;background:var(--bg);color:var(--tx);border:1px solid var(--bd);border-radius:8px;padding:10px;font-size:16px}
+.row button{border:none;border-radius:8px;padding:10px 14px;font-size:15px;font-weight:600;background:var(--acc);color:#fff}
+.mic{background:var(--bg2);border:1px solid var(--bd);color:var(--tx)}
+.mic.rec{background:var(--red);color:#fff}
+.err{color:var(--yellow);font-size:11px;padding:0 12px 8px}
+.talk{width:100%;border:none;border-top:1px solid var(--bd);background:transparent;color:var(--mut);padding:10px;font-size:13px;font-weight:600}
 .spawn{margin:14px 12px;border:1px dashed var(--bd);border-radius:10px;padding:12px}
 .spawn h3{margin:0 0 8px;font-size:13px;color:var(--mut)}
 .spawn select,.spawn input,.spawn textarea{width:100%;margin-bottom:8px;background:var(--bg);color:var(--tx);border:1px solid var(--bd);border-radius:8px;padding:10px;font-size:14px}
@@ -81,16 +88,45 @@ pre{margin:0;padding:8px 12px;font-size:11.5px;color:#9fb8a8;white-space:pre-wra
 <input id="base" placeholder="base branch (blank = main)"/>
 <textarea id="task" rows="2" placeholder="kickoff task…"></textarea>
 <button onclick="spawn()">Spawn</button></div>
-<div class="note">Tap "Remote control" on a terminal, then open it in the Claude app. Read-only otherwise.</div>
+<div class="note">Tap “Talk to this terminal” to send a message. 🎤 needs the HTTPS (Tailscale serve) URL; over http:// use your keyboard’s mic.</div>
 <script>
 var T=new URLSearchParams(location.search).get('t');
 function post(a){return fetch('/api/action?t='+T,{method:'POST',body:JSON.stringify(a)});}
 function esc(s){return (s||'').replace(/[&<>]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;'}[c];});}
 function rc(id){post({type:'remote',id:id});}
+var OPEN={},DRAFT={},SRC=window.webkitSpeechRecognition||window.SpeechRecognition;
+var CAN_MIC=!!SRC&&window.isSecureContext;
+var rec=null;
+function anyOpen(){for(var k in OPEN){if(OPEN[k])return true;}return false;}
+function talk(id){OPEN[id]=!OPEN[id];poll();}
+function draft(id){DRAFT[id]=document.getElementById('f'+id).value;}
+function send(id){
+  var f=document.getElementById('f'+id),v=(f.value||'').trim();
+  if(!v)return;
+  post({type:'input',id:id,text:v}).then(function(){f.value='';DRAFT[id]='';});
+}
+function serr(id,m){var e=document.getElementById('e'+id);if(e)e.textContent=m||'';}
+function micDown(id){
+  if(!CAN_MIC)return;
+  var f=document.getElementById('f'+id),base=f.value?f.value+' ':'';
+  serr(id,'');
+  rec=new SRC();rec.lang='en-US';rec.interimResults=true;rec.continuous=false;
+  rec.onresult=function(e){
+    var s='';for(var i=0;i<e.results.length;i++){s+=e.results[i][0].transcript;}
+    f.value=base+s;DRAFT[id]=f.value;
+  };
+  rec.onerror=function(e){
+    serr(id,e.error==='not-allowed'?'mic permission denied':e.error==='no-speech'?'didn\\'t catch that':e.error);
+  };
+  try{rec.start();document.getElementById('m'+id).className='mic rec';}catch(_e){}
+}
+function micUp(id){
+  if(rec){try{rec.stop();}catch(_e){}rec=null;}
+  var m=document.getElementById('m'+id);if(m)m.className='mic';
+}
 function spawn(){var r=document.getElementById('repo').value,b=document.getElementById('base').value.trim(),t=document.getElementById('task').value.trim();if(!t){alert('task?');return;}post({type:'spawn',repo:r,base:b||null,task:t}).then(function(){document.getElementById('task').value='';});}
 var repoFilled=false;
 function render(d){
-  document.getElementById('status').textContent=(d.terminals||[]).length+' terminals';
   if(!repoFilled&&(d.repos||[]).length){var s=document.getElementById('repo');s.innerHTML=d.repos.map(function(r){return '<option>'+esc(r)+'</option>';}).join('');repoFilled=true;}
   document.getElementById('list').innerHTML=(d.terminals||[]).map(function(t){
     return '<div class="card"><div class="chead"><span class="nm">'+esc(t.name)+'</span>'+
@@ -98,9 +134,18 @@ function render(d){
       '<span class="badge s-'+esc(t.state)+'">'+esc(t.state)+'</span></div>'+
       '<pre>'+esc(t.output||'')+'</pre>'+
       (t.id>=0?'<button class="rc'+(t.remoteOn?' on':'')+'" onclick="rc('+t.id+')">'+(t.remoteOn?'📱 remote on — tap to turn off':'📱 Remote control')+'</button>':'')+
+      (t.id>=0?'<button class="talk" onclick="talk('+t.id+')">'+(OPEN[t.id]?'▾ close':'💬 Talk to this terminal')+'</button>':'')+
+      (t.id>=0&&OPEN[t.id]?'<div class="row"><input id="f'+t.id+'" value="'+esc(DRAFT[t.id]||'')+'" oninput="draft('+t.id+')" placeholder="'+(CAN_MIC?'hold the mic, or type':'type — or use the keyboard mic')+'"/>'+
+        (CAN_MIC?'<button class="mic" id="m'+t.id+'" onpointerdown="micDown('+t.id+')" onpointerup="micUp('+t.id+')" onpointercancel="micUp('+t.id+')">🎤</button>':'')+
+        '<button onclick="send('+t.id+')">Send</button></div><div class="err" id="e'+t.id+'"></div>':'')+
     '</div>';
   }).join('');
 }
-function poll(){fetch('/api/floor?t='+T).then(function(r){return r.json();}).then(render).catch(function(){document.getElementById('status').textContent='disconnected';});}
+function poll(){fetch('/api/floor?t='+T).then(function(r){return r.json();}).then(function(d){
+  document.getElementById('status').textContent=(d.terminals||[]).length+' terminals';
+  // Re-rendering the list would wipe a half-dictated field, drop focus, and orphan a live
+  // recognition session — so while a compose row is open, only the status line updates.
+  if(!anyOpen())render(d);
+}).catch(function(){document.getElementById('status').textContent='disconnected';});}
 poll();setInterval(poll,2000);
 </script></body></html>`;
