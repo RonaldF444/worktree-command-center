@@ -208,6 +208,32 @@ function spawn(){
   }).catch(function(){err('spawn failed — offline?');});
 }
 var repoFilled=false;
+// The stage's children are built ONCE per focused session and then only their text is touched.
+// Rebuilding innerHTML every poll destroyed and recreated the <pre>, which reset scrollTop to 0
+// — that is what yanked you back to the top of the output every two seconds. Text is written
+// with textContent, so nothing here needs escaping either.
+var SKEY=null;
+function setStage(key,name,meta,out){
+  var st=document.getElementById('stage');
+  if(SKEY!==key){
+    SKEY=key;
+    st.innerHTML=key==='none'
+      ?'<div class="empty">nothing focused — tap a session below</div>'
+      :'<div class="sname" id="sname"></div><div class="smeta" id="smeta"></div><pre id="sout"></pre>';
+  }
+  if(key==='none')return;
+  var n=document.getElementById('sname'),m=document.getElementById('smeta'),p=document.getElementById('sout');
+  if(n.textContent!==name)n.textContent=name;
+  if(m.textContent!==meta)m.textContent=meta;
+  if(p.textContent!==out){
+    // Writing new text resets the scroll. Keep the reader where they were — and keep them
+    // pinned to the newest line if that is where they already were.
+    var atBottom=(p.scrollHeight-p.scrollTop-p.clientHeight)<24,prev=p.scrollTop;
+    p.textContent=out;
+    p.scrollTop=atBottom?p.scrollHeight:prev;
+  }
+}
+
 var COORD=false;
 function coord(){
   COORD=!COORD;
@@ -228,13 +254,9 @@ function render(d){
   kb.className='pill'+(TARGET==='kane'?' on':'');
   var l=stageList(d),c=null,i=idxOf(l,d.centeredId);
   if(i>=0)c=l[i];
-  if(TARGET==='kane'&&d.kane){
-    document.getElementById('stage').innerHTML='<div class="sname">Kane</div><div class="smeta">overseer · talking to him</div><pre>'+esc(d.kane.output||'')+'</pre>';
-  }else if(c){
-    document.getElementById('stage').innerHTML='<div class="sname">'+esc(c.name)+'</div><div class="smeta">'+esc(c.repo)+' · '+esc(c.branch)+'</div><pre>'+esc(c.output||'')+'</pre>';
-  }else{
-    document.getElementById('stage').innerHTML='<div class="empty">nothing focused — tap a session below</div>';
-  }
+  if(TARGET==='kane'&&d.kane)setStage('k','Kane','overseer · talking to him',d.kane.output||'');
+  else if(c)setStage('t'+c.id,c.name,c.repo+' · '+c.branch,c.output||'');
+  else setStage('none','','','');
   // EVERY other on-stage session, not just the neighbours: ten of them look like three, the
   // list just scrolls. This is the desk's centred tile plus its satellites, shrunk.
   document.getElementById('others').innerHTML=l.filter(function(t){return t.id!==d.centeredId;}).map(function(t){
