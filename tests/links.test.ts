@@ -1,22 +1,36 @@
-import { describe, it, expect, vi } from 'vitest';
-import { ctrlClickActivator } from '../src/terminals/links';
+import { describe, it, expect } from 'vitest';
+import { ctrlClickActivator, shouldOpen, OPEN_DEDUPE_MS } from '../src/terminals/links';
 
-const ev = (mods: { ctrlKey?: boolean; metaKey?: boolean }) => mods as unknown as MouseEvent;
+const click = (mods: Partial<MouseEvent> = {}): MouseEvent => ({ ctrlKey: false, metaKey: false, ...mods }) as MouseEvent;
 
 describe('ctrlClickActivator', () => {
-  it('opens the url only when Ctrl or Cmd is held', () => {
-    const open = vi.fn();
-    const activate = ctrlClickActivator(open);
-    activate(ev({ ctrlKey: true }), 'http://localhost:5173');
-    activate(ev({ metaKey: true }), 'http://localhost:5050');
-    expect(open).toHaveBeenCalledTimes(2);
-    expect(open).toHaveBeenNthCalledWith(1, 'http://localhost:5173');
-    expect(open).toHaveBeenNthCalledWith(2, 'http://localhost:5050');
-  });
+	it('opens only on Ctrl/Cmd+click', () => {
+		const opened: string[] = [];
+		const act = ctrlClickActivator((u) => opened.push(u));
+		act(click(), 'http://a');
+		expect(opened).toEqual([]);
+		act(click({ ctrlKey: true }), 'http://a');
+		act(click({ metaKey: true }), 'http://b');
+		expect(opened).toEqual(['http://a', 'http://b']);
+	});
+	it('yields when suppressed (TUI owns the mouse)', () => {
+		const opened: string[] = [];
+		let tui = true;
+		const act = ctrlClickActivator((u) => opened.push(u), () => tui);
+		act(click({ ctrlKey: true }), 'http://a');
+		expect(opened).toEqual([]); // TUI opens it, we must not
+		tui = false; // session died / plain shell — our handler takes over
+		act(click({ ctrlKey: true }), 'http://a');
+		expect(opened).toEqual(['http://a']);
+	});
+});
 
-  it('does nothing on a plain click (so selection/click is unaffected)', () => {
-    const open = vi.fn();
-    ctrlClickActivator(open)(ev({}), 'http://localhost:3000');
-    expect(open).not.toHaveBeenCalled();
-  });
+describe('shouldOpen', () => {
+	it('collapses a same-URL double-fire inside the dedupe window, allows it after', () => {
+		const t0 = 1_900_000_000_000; // fresh URL for this test run
+		expect(shouldOpen('http://dedupe-test/a', t0)).toBe(true);
+		expect(shouldOpen('http://dedupe-test/a', t0 + 50)).toBe(false); // OSC8 + regex double
+		expect(shouldOpen('http://dedupe-test/b', t0 + 60)).toBe(true);  // different URL is fine
+		expect(shouldOpen('http://dedupe-test/b', t0 + 60 + OPEN_DEDUPE_MS + 1)).toBe(true); // re-click later
+	});
 });

@@ -90,7 +90,7 @@ export class GodConsole {
 		this.term = new Terminal({ fontSize: 12, convertEol: false, cursorBlink: false, scrollback: 5000, theme: activeTerminalPalette(), ...activeTerminalFont(),
 			// OSC 8 hyperlinks from the new Claude TUI — open in the real browser on Ctrl/Cmd+click
 			// instead of xterm's built-in "navigate… could be dangerous" confirm (no linkHandler set).
-			linkHandler: { activate: (e, uri) => { if (e.ctrlKey || e.metaKey) openExternalUrl(uri); } },
+			linkHandler: { activate: (e, uri) => { if ((e.ctrlKey || e.metaKey) && !this.tuiOwnsMouse()) openExternalUrl(uri); } },
 		});
 		this.fit = new FitAddon();
 		this.term.loadAddon(this.fit);
@@ -102,8 +102,9 @@ export class GodConsole {
 			gl.onContextLoss(() => gl.dispose());
 			this.term.loadAddon(gl);
 		} catch { /* no GPU/context available — DOM renderer remains */ }
-		// Ctrl/Cmd+click a URL to open it in the real browser.
-		this.term.loadAddon(new WebLinksAddon(ctrlClickActivator(openExternalUrl)));
+		// Ctrl/Cmd+click a URL to open it in the real browser — unless the TUI owns the mouse
+		// (it opens clicked links itself; see tuiOwnsMouse).
+		this.term.loadAddon(new WebLinksAddon(ctrlClickActivator(openExternalUrl, () => this.tuiOwnsMouse())));
 		// Clipboard + scrollback keys, mirroring TerminalTile: Ctrl/Cmd+V pastes (xterm would
 		// otherwise send a literal ^V to Claude); Shift+Page/Arrow/Home/End scroll. Everything
 		// else passes through to Claude untouched.
@@ -139,14 +140,15 @@ export class GodConsole {
 			this.applyScroll(intent);
 			return false;
 		});
-		// Right-click: copy the selection if there is one, otherwise paste.
+		// Right-click: copy the selection if there is one, otherwise paste — but yield when the
+		// TUI owns the mouse (claude v2.1.227+ tracks the mouse and pastes on right-click itself).
 		this.bodyEl.addEventListener('contextmenu', (e) => {
 			e.preventDefault();
 			if (this.term?.hasSelection()) {
 				const sel = this.term.getSelection();
 				if (sel) this.writeClipboard(sel);
 				this.term.clearSelection();
-			} else {
+			} else if (!this.tuiOwnsMouse()) {
 				this.pasteFromClipboard();
 			}
 		});
@@ -293,6 +295,12 @@ export class GodConsole {
 		else if (intent.kind === 'pages') seq = intent.amount < 0 ? '\x1b[5~' : '\x1b[6~';
 		else seq = intent.amount < 0 ? '\x1b[<64;1;1M' : '\x1b[<65;1;1M';
 		this.bridge?.write(seq);
+	}
+
+	/** Does the running TUI track the mouse (DECSET 1000/1002/1003)? Then it receives our
+	 *  clicks and handles paste/links itself — our handlers must yield or everything doubles. */
+	private tuiOwnsMouse(): boolean {
+		return (this.term?.modes.mouseTrackingMode ?? 'none') !== 'none';
 	}
 
 	/** Paste clipboard text into the terminal (honors bracketed-paste via term.paste). */
