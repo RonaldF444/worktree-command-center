@@ -12,8 +12,11 @@ import { AttentionWidget } from './ui/attention-widget';
 import { WorkspaceBar } from './ui/workspace-bar';
 import { normalizeWorkspaces, addWorkspace, closeWorkspace, nextActiveAfter, type Workspace } from './terminals/workspace-store';
 import { THEMES, normalizeTheme, setActiveTheme, activeTerminalPalette } from './terminals/theme-store';
+import { partitionStale, probeWorktreeActivity, type PurgeRecord } from './terminals/session-purge';
+import { removeWorktreeAndBranch } from './terminals/worktree-manager';
 import * as path from 'path';
 import * as fs from 'fs';
+import { promises as fsp } from 'fs';
 import * as os from 'os';
 import { registerPrivateFeatures } from 'wcc-private';
 import type { SessionEnvProvider } from './private-api';
@@ -36,6 +39,29 @@ declare global {
 }
 
 let repos: RepoConfig[] = [];
+
+/** Boot-time purge of hidden terminals idle >= 5 days (spec 2026-08-10). Runs before any
+ *  grid exists so purged sessions never spawn a process. Never throws: an unreadable file
+ *  or failed deletion must not brick startup. */
+async function sweepStaleSessions(sessionsFile: string): Promise<string | null> {
+	let all: Record<string, PurgeRecord[]>;
+	try { all = JSON.parse(await fsp.readFile(sessionsFile, 'utf8')); } catch { return null; }
+	let purged = 0; let failed = 0; let changed = false;
+	for (const ws of Object.keys(all)) {
+		const { keep, purge, missing } = partitionStale(all[ws]!, Date.now(), probeWorktreeActivity);
+		if (purge.length === 0 && missing.length === 0) continue;
+		changed = true;
+		all[ws] = keep;
+		purged += purge.length + missing.length;
+		for (const e of purge) {
+			try { await removeWorktreeAndBranch(e.repoPath!, e.worktreePath!, e.branch!); }
+			catch { failed++; }
+		}
+	}
+	if (!changed) return null;
+	await fsp.writeFile(sessionsFile, JSON.stringify(all, null, 2), 'utf8');
+	return `Auto-purged ${purged} hidden session${purged === 1 ? '' : 's'} (idle 5+ days)` + (failed ? ` — ${failed} worktree cleanup${failed === 1 ? '' : 's'} failed` : '');
+}
 
 async function main(): Promise<void> {
 	try {
@@ -87,6 +113,12 @@ async function main(): Promise<void> {
 			for (const g of grids.values()) g.applyTerminalPalette(palette);
 			persist();
 		});
+
+		// Boot-time stale-session sweep (spec 2026-08-10): must run before ANY TerminalsGrid is
+		// constructed below, so a purged hidden session never gets a chance to spawn. Uses the
+		// same sessionsFile path depsFor() hands to every grid.
+		const purgeMsg = await sweepStaleSessions(path.join(userData, '.terminal-sessions.json'));
+		if (purgeMsg) toast(purgeMsg);
 
 		// --- workspaces ---
 		let workspaces: Workspace[] = normalizeWorkspaces(cfg.workspaces);
