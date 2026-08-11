@@ -1,4 +1,5 @@
 import { JournalStore } from './journal-store';
+import { Autosave } from './autosave';
 import { promptForConfirm } from '../ui/prompt-dialog';
 import type { StageTile } from './stage-tile';
 import { openExternalUrl } from './links';
@@ -40,6 +41,7 @@ export class JournalTile implements StageTile {
   private dirty = false;
   private showingHistory = false;
   private currentText = '';
+  private autosave = new Autosave(() => this.persist(false));
   private fmtBtn: HTMLButtonElement | null = null;
   private saveBtn: HTMLButtonElement | null = null;
   private historyBtn: HTMLButtonElement | null = null;
@@ -67,7 +69,7 @@ export class JournalTile implements StageTile {
     const hide = btns.createEl('button', { text: '–', cls: 'cos-term-hide', attr: { title: 'Hide — resurface from Coordination' } });
     hide.addEventListener('click', (e) => { e.stopPropagation(); this.opts.onHide(this); });
     const close = btns.createEl('button', { text: '×', attr: { title: 'Close this journal' } });
-    close.addEventListener('click', (e) => { e.stopPropagation(); void this.requestClose(); });
+    close.addEventListener('click', (e) => { e.stopPropagation(); this.requestClose(); });
 
     this.bodyEl = this.el.createDiv({ cls: 'cos-journal-body' });
     this.renderEditor();
@@ -90,7 +92,7 @@ export class JournalTile implements StageTile {
     const ta = this.bodyEl.createEl('textarea', { cls: 'cos-journal-text' }) as HTMLTextAreaElement;
     ta.value = this.currentText;
     ta.spellcheck = false;
-    ta.addEventListener('input', () => { this.currentText = ta.value; this.dirty = true; });
+    ta.addEventListener('input', () => { this.currentText = ta.value; this.dirty = true; this.autosave.schedule(); });
     ta.addEventListener('click', (e) => e.stopPropagation());
     this.textarea = ta;
   }
@@ -127,6 +129,7 @@ export class JournalTile implements StageTile {
   private openFromHistory(slug: string): void {
     const doc = this.opts.store.load(slug);
     if (!doc) return;
+    this.autosave.cancel(); // a save pending for the OLD document must not fire under the new slug
     this.slug = slug;
     this.displayName = doc.name;
     this.nameEl?.setText(doc.name);
@@ -136,14 +139,21 @@ export class JournalTile implements StageTile {
     this.renderEditor();
   }
 
-  save(): void {
+  save(): void { this.persist(true); }
+
+  /** Write the current text to the store. Manual saves toast; autosaves are silent. The first
+   *  write assigns the slug and onRename() re-persists the session list with it, so a crash
+   *  after this point restores the tile WITH its text. */
+  private persist(toast: boolean): void {
+    this.autosave.cancel();
     if (this.textarea && !this.showingHistory) this.currentText = this.textarea.value;
+    if (!toast && this.slug === undefined && this.currentText.trim() === '') return; // don't mint files for untouched tiles
     const slug = this.opts.store.uniqueSlug(this.displayName, this.slug);
     this.slug = slug;
     this.opts.store.save(slug, this.displayName, this.currentText, Date.now());
     this.dirty = false;
     this.opts.onRename();
-    this.opts.toast(`Saved "${this.displayName}"`);
+    if (toast) this.opts.toast(`Saved "${this.displayName}"`);
   }
 
   private setFooterDisabled(on: boolean): void {
@@ -176,7 +186,7 @@ export class JournalTile implements StageTile {
     pane('AFTER', after);
     const bar = this.bodyEl.createDiv({ cls: 'cos-journal-preview-actions' });
     bar.createEl('button', { text: 'Apply', cls: 'cos-journal-save' })
-      .addEventListener('click', (e) => { e.stopPropagation(); this.currentText = after; this.dirty = true; this.setFooterDisabled(false); this.renderEditor(); });
+      .addEventListener('click', (e) => { e.stopPropagation(); this.currentText = after; this.dirty = true; this.autosave.schedule(); this.setFooterDisabled(false); this.renderEditor(); });
     bar.createEl('button', { text: 'Discard' })
       .addEventListener('click', (e) => { e.stopPropagation(); this.setFooterDisabled(false); this.renderEditor(); });
   }
@@ -252,11 +262,9 @@ export class JournalTile implements StageTile {
 
   setName(name: string): void { this.displayName = name; this.nameEl?.setText(name); this.opts.onRename(); }
 
-  private async requestClose(): Promise<void> {
-    if (this.dirty) {
-      const ok = await promptForConfirm(`Close "${this.displayName}"?`, 'This journal has unsaved changes. Close without saving?', 'Close');
-      if (!ok) return;
-    }
+  /** Closing never discards anymore: autosave means the text is already (or now) on disk. */
+  private requestClose(): void {
+    if (this.dirty) this.persist(false);
     this.opts.onClosed(this);
   }
 
@@ -275,5 +283,9 @@ export class JournalTile implements StageTile {
   focus(): void { this.textarea?.focus(); }
   blur(): void { this.textarea?.blur(); }
   recentOutput(): string { return this.textarea?.value ?? this.currentText; }
-  kill(): void { this.el?.remove(); this.el = null; }
+  kill(): void {
+    if (this.dirty) this.persist(false); // app teardown mid-debounce: last keystrokes still reach disk
+    else this.autosave.cancel();
+    this.el?.remove(); this.el = null;
+  }
 }
