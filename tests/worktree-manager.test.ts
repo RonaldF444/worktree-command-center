@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { slugify, autoBranchName, defaultBranch, worktreePathFor, shouldRemoveWorktree } from '../src/terminals/worktree-manager';
+import { slugify, autoBranchName, defaultBranch, worktreePathFor, shouldRemoveWorktree, removeWorktreeAndBranch } from '../src/terminals/worktree-manager';
+import type { CommandResult } from '../src/command-runner';
 
 describe('slugify', () => {
 	it('makes a filesystem/branch-safe slug', () => {
@@ -117,5 +118,40 @@ describe('writeWorktreeSettings', () => {
 		const first = fs.readFileSync(writeWorktreeSettings(sidecarDir, 'C:/p/n.cjs', 'C:/p/c.cjs'), 'utf8');
 		const second = fs.readFileSync(writeWorktreeSettings(sidecarDir, 'C:/p/n.cjs', 'C:/p/c.cjs'), 'utf8');
 		expect(second).toBe(first);
+	});
+});
+
+describe('removeWorktreeAndBranch', () => {
+	const ok: CommandResult = { stdout: '', stderr: '', code: 0, timedOut: false };
+
+	it('throws when `git worktree remove` fails, and never attempts the branch delete (runCommand never rejects on its own — a failed removal must not look like success)', async () => {
+		const calls: string[][] = [];
+		const failing = async (cmd: string, args: string[]): Promise<CommandResult> => {
+			calls.push([cmd, ...args]);
+			return { stdout: '', stderr: 'fatal: unable to remove worktree: locked\n', code: 1, timedOut: false };
+		};
+		await expect(removeWorktreeAndBranch('C:\\repo', 'C:\\wt\\x', 'wt/x', failing)).rejects.toThrow('fatal: unable to remove worktree: locked');
+		expect(calls).toEqual([['git', 'worktree', 'remove', 'C:\\wt\\x', '--force']]);
+	});
+
+	it('throws using the timeout/spawn `error` field when there is no stderr (code null)', async () => {
+		const timedOut = async (): Promise<CommandResult> => ({ stdout: '', stderr: '', code: null, timedOut: true, error: 'timed out after 15s' });
+		await expect(removeWorktreeAndBranch('C:\\repo', 'C:\\wt\\x', 'wt/x', timedOut)).rejects.toThrow('timed out after 15s');
+	});
+
+	it('deletes the branch after a successful worktree remove', async () => {
+		const calls: string[][] = [];
+		const run = async (cmd: string, args: string[]): Promise<CommandResult> => { calls.push([cmd, ...args]); return ok; };
+		await expect(removeWorktreeAndBranch('C:\\repo', 'C:\\wt\\x', 'wt/x', run)).resolves.toBeUndefined();
+		expect(calls).toEqual([
+			['git', 'worktree', 'remove', 'C:\\wt\\x', '--force'],
+			['git', 'branch', '-D', 'wt/x'],
+		]);
+	});
+
+	it('a failed branch delete is non-fatal — the worktree is already gone either way', async () => {
+		const run = async (_cmd: string, args: string[]): Promise<CommandResult> =>
+			args[0] === 'branch' ? { stdout: '', stderr: 'error: branch not found', code: 1, timedOut: false } : ok;
+		await expect(removeWorktreeAndBranch('C:\\repo', 'C:\\wt\\x', 'wt/x', run)).resolves.toBeUndefined();
 	});
 });

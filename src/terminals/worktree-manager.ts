@@ -3,6 +3,8 @@ import * as fs from 'fs';
 import { runCommand } from '../command-runner';
 import { isParkCommitSubject, parkCommitSubject } from './worktree-registry';
 
+type RunCommand = typeof runCommand;
+
 export interface WorktreeInfo {
 	worktreePath: string;
 	branch: string;
@@ -116,12 +118,20 @@ export async function removeWorktreeIfPristine(
 	return rm.code === 0 ? 'removed' : 'kept';
 }
 
-/** Hard-delete a worktree AND its branch — used on a manual × (the branch should die). */
+/** Hard-delete a worktree AND its branch — used on a manual × (the branch should die).
+ *  `runCommand` never rejects (see command-runner.ts), so a failed `git worktree remove`
+ *  (e.g. the folder is OneDrive-locked) would otherwise look like a clean success. Throw
+ *  on that failure so callers can surface it; a failed branch delete is non-fatal — the
+ *  branch may already be gone or still checked out elsewhere, and the worktree is gone
+ *  either way. `run` is injectable for tests; defaults to the real runCommand. */
 export async function removeWorktreeAndBranch(
-	repoPath: string, worktreePath: string, branch: string,
+	repoPath: string, worktreePath: string, branch: string, run: RunCommand = runCommand,
 ): Promise<void> {
-	await runCommand('git', ['worktree', 'remove', worktreePath, '--force'], { cwd: repoPath, timeoutMs: 15000 });
-	await runCommand('git', ['branch', '-D', branch], { cwd: repoPath, timeoutMs: 8000 });
+	const rm = await run('git', ['worktree', 'remove', worktreePath, '--force'], { cwd: repoPath, timeoutMs: 15000 });
+	if (rm.code !== 0) {
+		throw new Error((rm.error ?? rm.stderr).split('\n')[0] || 'git worktree remove failed');
+	}
+	await run('git', ['branch', '-D', branch], { cwd: repoPath, timeoutMs: 8000 });
 }
 
 /** Auto-save a dirty worktree as a recoverable commit on ITS OWN branch. Returns the

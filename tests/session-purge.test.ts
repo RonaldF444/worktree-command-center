@@ -55,6 +55,27 @@ describe('partitionStale', () => {
 		const r = partitionStale([{ kind: 'terminal', hidden: true } as never], NOW, () => 0);
 		expect(r.keep.length).toBe(1);
 	});
+	it('does not throw on a null element (JSON.stringify turns undefined array holes into null); drops it, still purges a valid neighbor', () => {
+		let calls = 0;
+		const r = partitionStale([null, t({ lastActivity: OLD })] as never, NOW, () => { calls++; return 0; });
+		expect(r.purge.length).toBe(1);
+		expect(r.keep.length).toBe(0);
+		expect(r.missing).toContain(null);
+		expect(calls).toBe(0); // the null entry must never reach the probe
+	});
+	it('does not throw on other non-object elements (string/number) either — `typeof` scalars route to missing', () => {
+		const rows = ['oops', 42] as never;
+		expect(() => partitionStale(rows, NOW, () => 0)).not.toThrow();
+		const r = partitionStale(rows, NOW, () => 0);
+		expect(r.keep.length).toBe(0);
+		expect(r.missing.length).toBe(2);
+	});
+	it('an array element is `typeof object` (not null) so it is kept, not treated as poison — no throw either way', () => {
+		const rows = [['nested']] as never;
+		expect(() => partitionStale(rows, NOW, () => 0)).not.toThrow();
+		const r = partitionStale(rows, NOW, () => 0);
+		expect(r.keep.length).toBe(1);
+	});
 });
 
 import { probeWorktreeActivity } from '../src/terminals/session-purge';
@@ -155,5 +176,21 @@ describe('sweepStaleSessions', () => {
 	it('skips a per-workspace value that is not an array instead of throwing', async () => {
 		write({ default: 42 });
 		await expect(sweepStaleSessions(file)).resolves.toBeNull();
+	});
+
+	it('(h) a `null` entry inside a workspace array does not brick the sweep: no throw, file rewritten without it', async () => {
+		write({ default: [null] });
+		const msg = await sweepStaleSessions(file, { removeWorktree: async () => { throw new Error('must not be called for a null entry'); } });
+		expect(msg).toBe('Auto-purged 1 hidden session (idle 5+ days)');
+		expect(readAll().default).toEqual([]);
+	});
+
+	it('(i) a `null` entry alongside a real stale entry: both are dropped, only the real one triggers removeWorktree', async () => {
+		write({ default: [null, t({ lastActivity: REAL_OLD })] });
+		const calls: Array<[string, string, string]> = [];
+		const msg = await sweepStaleSessions(file, { removeWorktree: async (r, w, b) => { calls.push([r, w, b]); } });
+		expect(msg).toBe('Auto-purged 2 hidden sessions (idle 5+ days)');
+		expect(calls).toEqual([['C:\\repo', 'C:\\wt\\x', 'wt/x']]);
+		expect(readAll().default).toEqual([]);
 	});
 });

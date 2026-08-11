@@ -129,6 +129,7 @@ export class JournalTile implements StageTile {
   private openFromHistory(slug: string): void {
     const doc = this.opts.store.load(slug);
     if (!doc) return;
+    if (this.dirty) this.persist(false); // flush the OLD document's unsaved text under its OWN slug first
     this.autosave.cancel(); // a save pending for the OLD document must not fire under the new slug
     this.slug = slug;
     this.displayName = doc.name;

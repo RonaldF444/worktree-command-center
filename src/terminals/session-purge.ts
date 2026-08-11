@@ -21,6 +21,10 @@ export function partitionStale<T extends PurgeRecord>(
 ): { keep: T[]; purge: T[]; missing: T[] } {
 	const keep: T[] = []; const purge: T[] = []; const missing: T[] = [];
 	for (const e of entries) {
+		// `JSON.stringify` turns undefined array elements into `null`, and a malformed file could
+		// hand us any JSON scalar here. Route non-object entries to `missing`: dropped from `keep`
+		// (so the file gets repaired) and counted, but never looped for deletion (only `purge` is).
+		if (typeof e !== 'object' || e === null) { missing.push(e); continue; }
 		if (e.kind !== 'terminal' || e.hidden !== true || !e.worktreePath || !e.repoPath || !e.branch) { keep.push(e); continue; }
 		let last = e.lastActivity;
 		if (last === undefined) {
