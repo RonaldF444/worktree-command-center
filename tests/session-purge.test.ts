@@ -44,3 +44,30 @@ describe('partitionStale', () => {
 		expect(r.keep.length).toBe(1);
 	});
 });
+
+import { probeWorktreeActivity } from '../src/terminals/session-purge';
+
+describe('probeWorktreeActivity', () => {
+	const io = (over: object) => ({
+		statMtime: () => null, readText: () => null, lastCommitSec: () => null, ...over,
+	});
+	it('returns -1 when the worktree root does not stat', () => {
+		expect(probeWorktreeActivity('C:\\gone', io({}))).toBe(-1);
+	});
+	it('takes the newest of all signals', () => {
+		const m = new Map([['C:\\wt', 100], ['C:\\wt\\.git', 200], ['C:\\gd\\logs\\HEAD', 900], ['C:\\gd\\index', 300], ['C:\\gd\\HEAD', 400]]);
+		const p = probeWorktreeActivity('C:\\wt', io({
+			statMtime: (x: string) => m.get(x) ?? null,
+			readText: () => 'gitdir: C:\\gd',
+			lastCommitSec: () => null,
+		}));
+		expect(p).toBe(900);
+	});
+	it('uses last commit time when newer', () => {
+		const p = probeWorktreeActivity('C:\\wt', io({ statMtime: (x: string) => (x === 'C:\\wt' ? 100 : null), lastCommitSec: () => 5 }));
+		expect(p).toBe(5000);
+	});
+	it('returns root mtime alone when git signals fail', () => {
+		expect(probeWorktreeActivity('C:\\wt', io({ statMtime: (x: string) => (x === 'C:\\wt' ? 100 : null) }))).toBe(100);
+	});
+});

@@ -1,3 +1,7 @@
+import * as fsSync from 'fs';
+import * as path from 'path';
+import { execFileSync } from 'child_process';
+
 export const PURGE_AFTER_MS = 5 * 864e5;
 export const REPLAY_WINDOW_MS = 2 * 60_000;
 
@@ -25,4 +29,37 @@ export function partitionStale<T extends PurgeRecord>(
 		if (now - last >= PURGE_AFTER_MS) purge.push(e); else keep.push(e);
 	}
 	return { keep, purge, missing };
+}
+
+export interface ProbeIo {
+	statMtime(p: string): number | null;
+	readText(p: string): string | null;
+	lastCommitSec(wt: string): number | null;
+}
+
+const realIo: ProbeIo = {
+	statMtime: (p) => { try { return fsSync.statSync(p).mtimeMs; } catch { return null; } },
+	readText: (p) => { try { return fsSync.readFileSync(p, 'utf8'); } catch { return null; } },
+	lastCommitSec: (wt) => {
+		try {
+			const out = execFileSync('git', ['-C', wt, 'log', '-1', '--format=%ct'], { timeout: 10_000, encoding: 'utf8' }).trim();
+			return out ? Number(out) : null;
+		} catch { return null; }
+	},
+};
+
+/** Newest on-disk activity for a worktree; -1 = worktree gone, 0 = no readable signal. */
+export function probeWorktreeActivity(worktreePath: string, io: ProbeIo = realIo): number {
+	const root = io.statMtime(worktreePath);
+	if (root === null) return -1;
+	let best = root;
+	const take = (v: number | null): void => { if (v !== null && v > best) best = v; };
+	const dotgit = path.join(worktreePath, '.git');
+	take(io.statMtime(dotgit));
+	const pointer = io.readText(dotgit);
+	const gd = pointer?.includes('gitdir:') ? pointer.split('gitdir:')[1]!.trim() : null;
+	if (gd) for (const tail of ['logs/HEAD', 'index', 'HEAD']) take(io.statMtime(path.join(gd, tail)));
+	const commit = io.lastCommitSec(worktreePath);
+	take(commit !== null ? commit * 1000 : null);
+	return best;
 }
