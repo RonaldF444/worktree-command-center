@@ -91,8 +91,16 @@ async function main(): Promise<void> {
 
 		// Boot-time stale-session sweep (spec 2026-08-10): must run before ANY TerminalsGrid is
 		// constructed below, so a purged hidden session never gets a chance to spawn. Uses the
-		// same sessionsFile path depsFor() hands to every grid.
-		const purgeMsg = await sweepStaleSessions(path.join(userData, '.terminal-sessions.json'));
+		// same sessionsFile path depsFor() hands to every grid. Only the file rewrite is
+		// awaited — worktree deletions run detached and report back via toast when done.
+		const purgeMsg = await sweepStaleSessions(path.join(userData, '.terminal-sessions.json'), {
+			onCleanupDone: (failed, attempted) => {
+				if (attempted === 0) return;
+				toast(failed
+					? `Stale worktree cleanup: ${attempted - failed}/${attempted} removed — ${failed} left on disk`
+					: `Stale worktree cleanup finished (${attempted} removed)`);
+			},
+		});
 		if (purgeMsg) toast(purgeMsg);
 
 		// --- workspaces ---

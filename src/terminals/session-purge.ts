@@ -71,6 +71,9 @@ export function probeWorktreeActivity(worktreePath: string, io: ProbeIo = realIo
 	const pointer = io.readText(dotgit);
 	const gd = pointer?.includes('gitdir:') ? pointer.split('gitdir:')[1]!.trim() : null;
 	if (gd) for (const tail of ['logs/HEAD', 'index', 'HEAD']) take(io.statMtime(path.join(gd, tail)));
+	// Stat signals alone can prove freshness; only consult git (a subprocess, expensive and
+	// blocking) when the mtimes still look stale and a commit date might rescue the entry.
+	if (Date.now() - best < PURGE_AFTER_MS) return best;
 	const commit = io.lastCommitSec(worktreePath);
 	take(commit !== null ? commit * 1000 : null);
 	return best;
@@ -79,6 +82,8 @@ export function probeWorktreeActivity(worktreePath: string, io: ProbeIo = realIo
 export interface SweepDeps {
 	removeWorktree?: (repoPath: string, worktreePath: string, branch: string) => Promise<void>;
 	probe?: (worktreePath: string) => number;
+	/** Called when the detached worktree deletions finish: (failed, attempted). */
+	onCleanupDone?: (failed: number, attempted: number) => void;
 }
 
 /** Boot-time purge of hidden terminals idle >= 5 days (spec 2026-08-10). Callers should run
@@ -94,7 +99,8 @@ export async function sweepStaleSessions(sessionsFile: string, deps: SweepDeps =
 	try { raw = JSON.parse(await fsp.readFile(sessionsFile, 'utf8')); } catch { return null; }
 	if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null;
 	const all = raw as Record<string, PurgeRecord[]>;
-	let purged = 0; let failed = 0; let changed = false;
+	let purged = 0; let changed = false;
+	const toDelete: PurgeRecord[] = [];
 	for (const ws of Object.keys(all)) {
 		const entries = all[ws];
 		if (!Array.isArray(entries)) continue; // malformed per-workspace value — skip, don't throw
@@ -103,12 +109,21 @@ export async function sweepStaleSessions(sessionsFile: string, deps: SweepDeps =
 		changed = true;
 		all[ws] = keep;
 		purged += purge.length + missing.length;
-		for (const e of purge) {
+		toDelete.push(...purge);
+	}
+	if (!changed) return null;
+	// The file rewrite is what stops purged sessions from spawning — boot only waits for THIS.
+	await fsp.writeFile(sessionsFile, JSON.stringify(all, null, 2), 'utf8');
+	// Worktree deletion can take tens of seconds each (OneDrive-synced trees especially) and
+	// must never hold the UI hostage: run detached, report the outcome via onCleanupDone. The
+	// 2026-08-11 first boot froze ~3.5 min because these awaits sat in front of the grid.
+	void (async () => {
+		let failed = 0;
+		for (const e of toDelete) {
 			try { await removeWorktree(e.repoPath!, e.worktreePath!, e.branch!); }
 			catch { failed++; }
 		}
-	}
-	if (!changed) return null;
-	await fsp.writeFile(sessionsFile, JSON.stringify(all, null, 2), 'utf8');
-	return `Auto-purged ${purged} hidden session${purged === 1 ? '' : 's'} (idle 5+ days)` + (failed ? ` — ${failed} worktree cleanup${failed === 1 ? '' : 's'} failed` : '');
+		deps.onCleanupDone?.(failed, toDelete.length);
+	})().catch(() => { /* onCleanupDone itself threw — never let it surface as unhandled */ });
+	return `Auto-purged ${purged} hidden session${purged === 1 ? '' : 's'} (idle 5+ days)`;
 }

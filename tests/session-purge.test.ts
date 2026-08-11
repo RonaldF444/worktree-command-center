@@ -103,6 +103,16 @@ describe('probeWorktreeActivity', () => {
 	it('returns root mtime alone when git signals fail', () => {
 		expect(probeWorktreeActivity('C:\\wt', io({ statMtime: (x: string) => (x === 'C:\\wt' ? 100 : null) }))).toBe(100);
 	});
+	it('skips the git call entirely when stat signals already prove freshness', () => {
+		let gitCalls = 0;
+		const fresh = Date.now() - 1000;
+		const p = probeWorktreeActivity('C:\\wt', io({
+			statMtime: (x: string) => (x === 'C:\\wt' ? fresh : null),
+			lastCommitSec: () => { gitCalls++; return null; },
+		}));
+		expect(p).toBe(fresh);
+		expect(gitCalls).toBe(0);
+	});
 });
 
 describe('sweepStaleSessions', () => {
@@ -124,10 +134,23 @@ describe('sweepStaleSessions', () => {
 	it('(a) purges an old hidden terminal entry: rewrites file, calls removeWorktree with its identity, singular message', async () => {
 		write({ default: [t({ lastActivity: REAL_OLD })] });
 		const calls: Array<[string, string, string]> = [];
-		const msg = await sweepStaleSessions(file, { removeWorktree: async (r, w, b) => { calls.push([r, w, b]); } });
+		let onDone!: () => void;
+		const cleanupDone = new Promise<void>((res) => { onDone = () => res(); });
+		const msg = await sweepStaleSessions(file, {
+			removeWorktree: async (r, w, b) => { calls.push([r, w, b]); },
+			onCleanupDone: () => onDone(),
+		});
 		expect(msg).toBe('Auto-purged 1 hidden session (idle 5+ days)');
+		await cleanupDone; // deletions are detached from boot — wait for them before asserting
 		expect(calls).toEqual([['C:\\repo', 'C:\\wt\\x', 'wt/x']]);
 		expect(readAll().default).toEqual([]);
+	});
+
+	it('(j) boot never blocks on deletions: sweep resolves and the file is rewritten even while removeWorktree hangs forever', async () => {
+		write({ default: [t({ lastActivity: REAL_OLD })] });
+		const msg = await sweepStaleSessions(file, { removeWorktree: () => new Promise<never>(() => { /* never settles */ }) });
+		expect(msg).toBe('Auto-purged 1 hidden session (idle 5+ days)');
+		expect(readAll().default).toEqual([]); // file already repaired before the hung deletion finishes
 	});
 
 	it('(b) drops a missing-worktree entry (probe = -1), counts it, never calls removeWorktree', async () => {
@@ -156,11 +179,17 @@ describe('sweepStaleSessions', () => {
 		await expect(sweepStaleSessions(path.join(dir, 'does-not-exist.json'))).resolves.toBeNull();
 	});
 
-	it('(f) a rejecting removeWorktree still drops the entry and reports the failure count', async () => {
+	it('(f) a rejecting removeWorktree still drops the entry; the failure reaches onCleanupDone, not the boot message', async () => {
 		write({ default: [t({ lastActivity: REAL_OLD })] });
-		const msg = await sweepStaleSessions(file, { removeWorktree: async () => { throw new Error('boom'); } });
-		expect(msg).toBe('Auto-purged 1 hidden session (idle 5+ days) — 1 worktree cleanup failed');
+		let report!: (f: number, a: number) => void;
+		const done = new Promise<[number, number]>((res) => { report = (f, a) => res([f, a]); });
+		const msg = await sweepStaleSessions(file, {
+			removeWorktree: async () => { throw new Error('boom'); },
+			onCleanupDone: (f, a) => report(f, a),
+		});
+		expect(msg).toBe('Auto-purged 1 hidden session (idle 5+ days)');
 		expect(readAll().default).toEqual([]);
+		expect(await done).toEqual([1, 1]); // 1 failed of 1 attempted
 	});
 
 	it('(g) pluralizes "sessions" when more than one is purged', async () => {
