@@ -209,13 +209,17 @@ export class TerminalTile implements StageTile {
 
 		this.term.onData((d) => {
 			this.bridge?.write(d); // always forwarded — Claude asked for these reports
-			this.lastActivityMs = Date.now();
-			if (this.pasting) return; // pasted content (incl. its newlines) is NOT a submit
+			if (this.pasting) { this.lastActivityMs = Date.now(); return; } // pasted content (incl. its newlines) is NOT a submit, but IS activity
 			// Only a HUMAN keystroke means "this session is being worked on". xterm answers
 			// Claude's focus reporting (DECSET 1004) on the same channel, so the focus/blur
 			// WE cause by centering a tile would otherwise clear its idle flag and bounce the
 			// spotlight to the next tile — forever, with nobody at the keyboard (2026-07-28).
+			// Same reason the activity stamp lives below this filter, not above it: protocol
+			// echoes (focus/mouse reports, DSR/DA/OSC/DCS replies) also arrive via onData, and
+			// every restored session gets one on its --continue relaunch — stamping before the
+			// filter would re-freshen a restored hidden session's lastActivity on every boot.
 			if (!isUserInput(d)) return;
+			this.lastActivityMs = Date.now();
 			if (d.includes('\r')) { this.idle = false; this.opts.onEnter?.(this); }
 			else this.opts.onInput?.(this, d);
 		});
