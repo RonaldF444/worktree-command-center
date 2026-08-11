@@ -382,6 +382,7 @@ export class TerminalTile implements StageTile {
 
 	/** Type a line into the session (text + Enter) — used by the chat broadcast/relay. */
 	sendLine(text: string): void {
+		this.lastActivityMs = Date.now(); // programmatic user input (phone remote / chat) — bypasses term.onData
 		this.bridge?.write(text);
 		// Submit Enter as a SEPARATE write on a later tick. Bundling "text\r" into one PTY
 		// write makes Claude's input treat the trailing \r as a pasted newline — it lands in
@@ -402,6 +403,7 @@ export class TerminalTile implements StageTile {
 	/** Send raw keystrokes verbatim (no auto-Enter) — used to answer prompts from the
 	 *  chat (Approve = Enter "\r", Deny = Escape "\x1b"). */
 	sendKeys(raw: string): void {
+		this.lastActivityMs = Date.now(); // programmatic user input (phone remote / chat) — bypasses term.onData
 		this.bridge?.write(raw);
 	}
 
