@@ -34,10 +34,19 @@ export class UsageProbe {
 		});
 	}
 
-	/** Refresh: boot a session, open /usage, wait for the scan to settle, scrape, then kill
+	/** Refresh: boot a session, open /usage, wait for the readout to settle, scrape, then kill
 	 *  the session — the next refresh must be a new process to get a fresh fetch. */
 	async refresh(): Promise<UsageReadout> {
 		return this.refreshOnce(true);
+	}
+
+	private static sleep(ms: number): Promise<void> {
+		return new Promise((r) => window.setTimeout(r, ms));
+	}
+
+	/** Has the /usage screen actually opened? (v2.1.227 renders it as the Usage settings tab.) */
+	private opened(): boolean {
+		return /current\s*session/i.test(stripAnsi(this.buf));
 	}
 
 	private async refreshOnce(retryOnEmpty: boolean): Promise<UsageReadout> {
@@ -45,24 +54,37 @@ export class UsageProbe {
 		const b = this.bridge;
 		if (!b) throw new Error('usage probe: session unavailable');
 		this.buf = '';
-		// Submit like TerminalTile.sendLine: text first, then a SEPARATED Enter on a later tick.
-		// Bundling "/usage\r" into one write makes the sidecar/ConPTY coalesce it so the \r lands
-		// as a pasted newline that never submits — which is why the battery read 0 (it never ran).
-		b.write('/usage');
-		// 200ms: match TerminalTile.sendLine — the new TUI's wider paste window eats a fast \r.
-		window.setTimeout(() => this.bridge?.write('\r'), 200);
-		const readout = await new Promise<UsageReadout>((resolve) => {
-			const started = Date.now();
-			const iv = window.setInterval(() => {
-				const r = parseUsage(this.buf);
-				const tail = stripAnsi(this.buf).slice(-200);
-				const settled = r.sessionPct !== null && r.sessionReset !== null && !/scanning|refreshing/i.test(tail);
-				if (settled || Date.now() - started > 12000) {
-					window.clearInterval(iv);
-					resolve(parseUsage(this.buf));
-				}
-			}, 400);
-		});
+		// SUBMIT-AND-VERIFY (2026-08-11): the v2.1.227 slash-command autocomplete eats or defers
+		// a blind text-then-\r submission most of the time (empirically 1-in-4). So: close any
+		// menu with Esc, type, Enter — then VERIFY the usage screen opened and retry if not.
+		// The separated Enter still matters (a bundled "/usage\r" pastes and never submits).
+		for (let attempt = 0; attempt < 3 && !this.opened(); attempt++) {
+			this.bridge?.write('\x1b');
+			await UsageProbe.sleep(250);
+			this.bridge?.write('/usage');
+			await UsageProbe.sleep(400); // let the autocomplete menu settle before Enter
+			this.bridge?.write('\r');
+			for (let i = 0; i < 20 && !this.opened(); i++) await UsageProbe.sleep(200);
+			if (!this.opened()) { // a second Enter clears a menu that swallowed the first
+				this.bridge?.write('\r');
+				for (let i = 0; i < 15 && !this.opened(); i++) await UsageProbe.sleep(200);
+			}
+		}
+		// SETTLE: session + week render as soon as the limits fetch lands; the Fable row only
+		// joins after a further refresh pass, so give it a grace window and stop waiting on
+		// plans that simply have no Fable section. The old "no scanning/refreshing in the tail"
+		// check is gone: the accumulated stream buffer effectively always contains those words
+		// on v2.1.227 (the local-session scan repaints continuously), so it never settled.
+		const started = Date.now();
+		let primarySince: number | null = null;
+		let readout = parseUsage(this.buf);
+		while (Date.now() - started < 30000) {
+			readout = parseUsage(this.buf);
+			const primary = readout.sessionPct !== null && readout.sessionReset !== null && readout.weekPct !== null;
+			if (primary && primarySince === null) primarySince = Date.now();
+			if (primary && (readout.fablePct !== null || Date.now() - primarySince! > 8000)) break;
+			await UsageProbe.sleep(400);
+		}
 		this.dispose(); // fresh session per refresh — see the class comment
 		// A first-ever session in the probe dir boots into claude's trust prompt, which eats
 		// the /usage keystrokes (the Enter accepts the prompt — our own empty dir, safe). One

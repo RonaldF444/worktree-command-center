@@ -193,6 +193,8 @@ export class TerminalsGrid {
 		this.modelSel = controls.createEl('select');
 		this.modelSel.title = 'Model for new terminals';
 		for (const m of SPAWN_MODELS) this.modelSel.createEl('option', { text: m.label, value: m.value });
+		// Opus preselected on open (user preference, 2026-08-11) — 'Model: Default' stays available.
+		this.modelSel.value = SPAWN_MODELS.find((m) => m.label.startsWith('Opus'))?.value ?? '';
 
 		this.effortSel = controls.createEl('select');
 		this.effortSel.title = 'Effort for new terminals';

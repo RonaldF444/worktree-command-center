@@ -47,19 +47,33 @@ function spentIn(s: string): string | null {
 	return m ? m[0].replace(/\s+/g, ' ').trim() : null;
 }
 
+/** The Fable row survives TUI redraws worst of all: cell-positioned repaints slice its label
+ *  ("Current week (Fable)" arrives as just "Fable)") and can cut the "% used" suffix off the
+ *  number. Scan EVERY "fable" anchor in the buffer and take the best-fidelity parse: a full
+ *  "N% used", then a bare "N%", then a trailing bare number right after the bar glyphs. */
+function fableIn(t: string): { pct: number | null; reset: string | null } {
+	const windows: string[] = [];
+	const re = /fable\s*\)?/gi;
+	for (let m = re.exec(t); m; m = re.exec(t)) windows.push(t.slice(m.index, m.index + 200));
+	for (const w of windows) { const p = pctIn(w); if (p !== null) return { pct: p, reset: resetIn(w) }; }
+	for (const w of windows) { const m = /(\d{1,3})\s*%/.exec(w); if (m) return { pct: Math.min(100, parseInt(m[1]!, 10)), reset: resetIn(w) }; }
+	for (const w of windows) { const m = /[█▉▊▋▌▍▎▏]\s*(\d{1,3})(?!\d)/.exec(w); if (m) return { pct: Math.min(100, parseInt(m[1]!, 10)), reset: resetIn(w) }; }
+	return { pct: null, reset: null };
+}
+
 export function parseUsage(text: string): UsageReadout {
 	const t = stripAnsi(text);
 	const sess = sectionAfter(t, /current\s*session/i);
 	const week = sectionAfter(t, /current\s*week\s*\(?\s*all\s*models\)?/i);
-	const fable = sectionAfter(t, /current\s*week\s*\(\s*fable\s*\)/i);
+	const fable = fableIn(t);
 	const credits = sectionAfter(t, /usage\s*credits/i);
 	return {
 		sessionPct: pctIn(sess),
 		sessionReset: resetIn(sess),
 		weekPct: pctIn(week),
 		weekReset: resetIn(week),
-		fablePct: pctIn(fable),
-		fableReset: resetIn(fable),
+		fablePct: fable.pct,
+		fableReset: fable.reset,
 		creditsPct: pctIn(credits),
 		creditsSpent: spentIn(credits),
 		creditsReset: resetIn(credits),
