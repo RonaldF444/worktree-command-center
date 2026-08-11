@@ -3,6 +3,15 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { partitionStale, PURGE_AFTER_MS, sweepStaleSessions } from '../src/terminals/session-purge';
+import { shouldStampOutput, REPLAY_WINDOW_MS } from '../src/terminals/session-purge';
+
+describe('shouldStampOutput', () => {
+	it('ignores output inside the replay window, stamps after', () => {
+		const spawn = 1_800_000_000_000;
+		expect(shouldStampOutput(spawn, spawn + REPLAY_WINDOW_MS - 1)).toBe(false);
+		expect(shouldStampOutput(spawn, spawn + REPLAY_WINDOW_MS + 1)).toBe(true);
+	});
+});
 
 const NOW = 1_800_000_000_000;
 const OLD = NOW - PURGE_AFTER_MS - 1;

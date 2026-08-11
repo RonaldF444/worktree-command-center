@@ -15,6 +15,7 @@ import { activeTerminalPalette, activeTerminalFont, type TerminalPalette } from 
 import { ctrlClickActivator, openExternalUrl } from './links';
 import { promptForConfirm } from '../ui/prompt-dialog';
 import type { StageTile } from './stage-tile';
+import { shouldStampOutput } from './session-purge';
 
 export interface TerminalTileOpts {
 	tileId: number;
@@ -40,6 +41,7 @@ export interface TerminalTileOpts {
 	name?: string;
 	onRename?: (tile: TerminalTile, name: string) => void;
 	onRequestRename?: (tile: TerminalTile, currentName: string) => void;
+	initialLastActivity?: number;
 }
 
 /** One embedded claude terminal (xterm) bound to a sidecar session + worktree. */
@@ -71,12 +73,21 @@ export class TerminalTile implements StageTile {
 	private hiddenBuf = new HiddenOutputBuffer();
 	private flushTimer: number | null = null;
 	readonly isJournal = false;
+	private spawnedAtMs = Date.now();
+	private lastActivityMs: number;
 
 	constructor(private opts: TerminalTileOpts) {
 		this.displayName = opts.name ?? `${opts.repoName} · ${opts.worktree.branch}`;
+		this.lastActivityMs = opts.initialLastActivity ?? Date.now();
 	}
 
 	get tileId(): number { return this.opts.tileId; }
+	get lastActivity(): number { return this.lastActivityMs; }
+
+	/** Restore-time correction ONLY: reapplies a persisted stamp after setHidden(true) — which
+	 *  is also the live "hide" action and legitimately stamps — would otherwise overwrite a
+	 *  restored-but-untouched hidden session's old lastActivity with "now" (see restoreRecord). */
+	setLastActivity(ts: number): void { this.lastActivityMs = ts; }
 
 	render(parent: HTMLElement): void {
 		this.el = parent.createDiv({ cls: 'cos-term-tile' });
@@ -198,6 +209,7 @@ export class TerminalTile implements StageTile {
 
 		this.term.onData((d) => {
 			this.bridge?.write(d); // always forwarded — Claude asked for these reports
+			this.lastActivityMs = Date.now();
 			if (this.pasting) return; // pasted content (incl. its newlines) is NOT a submit
 			// Only a HUMAN keystroke means "this session is being worked on". xterm answers
 			// Claude's focus reporting (DECSET 1004) on the same channel, so the focus/blur
@@ -255,6 +267,7 @@ export class TerminalTile implements StageTile {
 	setCentered(on: boolean): void {
 		this.centered = on;
 		this.el?.toggleClass('centered', on);
+		if (on) this.lastActivityMs = Date.now();
 		this.updateSuspension(); // centered = live output; satellites batch (300ms)
 		if (on) this.fitSoon(); // fit the PTY to the centered size (after the size animation settles)
 		else this.term?.scrollToBottom(); // leaving center: snap the (un-refit) satellite to its latest line
@@ -289,6 +302,7 @@ export class TerminalTile implements StageTile {
 		if (!this.el) return;
 		this.el.style.display = on ? 'none' : '';
 		this.minimized = on;
+		this.lastActivityMs = Date.now();
 		this.updateSuspension();
 		if (!on) this.fitSoon(); // re-show: the term was display:none, so refit to the stage
 	}
@@ -539,6 +553,7 @@ export class TerminalTile implements StageTile {
 	 *  --continue finds no conversation (transcript gone), relaunch a FRESH session in place,
 	 *  so ⟳ can revive a terminal that says "No conversation found to continue". */
 	private startSession(resume: boolean, fallbackFresh = false): void {
+		this.spawnedAtMs = Date.now(); // every (re)launch resets the replay-window clock — see shouldStampOutput
 		const args = resume ? ['--continue'] : [];
 		if (this.opts.bypassPermissions) args.push('--dangerously-skip-permissions');
 		if (this.opts.model) args.push('--model', this.opts.model);
@@ -558,7 +573,11 @@ export class TerminalTile implements StageTile {
 		};
 		let probe = ''; // first bytes only (capped) — used to detect the --continue "no conversation" exit
 		this.bridge = new SessionBridge(this.opts.sidecarPath, this.opts.worktree.worktreePath, 'claude', args, env);
-		this.bridge.onData((d) => { if (fallbackFresh && probe.length < 2048) probe += d; this.writeOut(d); });
+		this.bridge.onData((d) => {
+			if (fallbackFresh && probe.length < 2048) probe += d;
+			if (shouldStampOutput(this.spawnedAtMs, Date.now())) this.lastActivityMs = Date.now();
+			this.writeOut(d);
+		});
 		this.bridge.onExit((code) => {
 			if (fallbackFresh && /no conversation found to continue/i.test(probe)) {
 				this.hiddenBuf.clear();      // stale pre-reset output must not replay after the reset

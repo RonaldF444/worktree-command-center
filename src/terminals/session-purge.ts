@@ -33,6 +33,12 @@ export function partitionStale<T extends PurgeRecord>(
 	return { keep, purge, missing };
 }
 
+/** PTY output only counts as activity after the --continue replay window, so a mere
+ *  relaunch never resets a hidden session's idle clock. */
+export function shouldStampOutput(spawnedAt: number, now: number): boolean {
+	return now - spawnedAt > REPLAY_WINDOW_MS;
+}
+
 export interface ProbeIo {
 	statMtime(p: string): number | null;
 	readText(p: string): string | null;

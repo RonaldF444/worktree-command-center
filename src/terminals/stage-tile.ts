@@ -7,6 +7,7 @@ export interface StageTile {
   readonly repoName: string;
   readonly isJournal: boolean;
   readonly isSelected: boolean;
+  readonly lastActivity?: number;
   render(parent: HTMLElement): void;
   setRect(r: { x: number; y: number; w: number; h: number }): void;
   setCentered(on: boolean): void;

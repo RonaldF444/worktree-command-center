@@ -53,7 +53,7 @@ export interface GridDeps {
 	toast: (msg: string) => void;
 	promptForTopic: (title: string, placeholder: string, initial?: string, okLabel?: string) => Promise<string | null>;
 }
-interface SessionRecord { worktreePath: string; branch: string; repoName: string; repoPath: string; baseBranch: string; name?: string; hidden?: boolean; kind?: 'terminal' | 'journal' | 'god'; journalSlug?: string; model?: string; effort?: string; }
+interface SessionRecord { worktreePath: string; branch: string; repoName: string; repoPath: string; baseBranch: string; name?: string; hidden?: boolean; kind?: 'terminal' | 'journal' | 'god'; journalSlug?: string; model?: string; effort?: string; lastActivity?: number; }
 
 // Model options for the spawn toolbar dropdown. Empty value = inherit the claude CLI default.
 const SPAWN_MODELS: { label: string; value: string }[] = [
@@ -1188,7 +1188,7 @@ export class TerminalsGrid {
 	}
 
 	/** Build a tile with all the grid callbacks wired. `resume` → claude --continue. */
-	private makeTile(worktree: WorktreeInfo, repoName: string, repoPath: string, baseBranch: string, resume: boolean, name?: string, model?: string, effort?: string): TerminalTile {
+	private makeTile(worktree: WorktreeInfo, repoName: string, repoPath: string, baseBranch: string, resume: boolean, name?: string, model?: string, effort?: string, initialLastActivity?: number): TerminalTile {
 		return new TerminalTile({
 			tileId: this.nextTileId++,
 			repoName, repoPath, baseBranch, worktree,
@@ -1200,6 +1200,7 @@ export class TerminalsGrid {
 			model,
 			effort,
 			name,
+			initialLastActivity,
 			onRename: () => { void this.persist(); },
 			onRequestRename: (t, cur) => {
 				void this.deps.promptForTopic('Rename terminal', 'New name', cur, 'Rename').then((name) => { if (name && name.trim()) t.setName(name.trim()); });
@@ -1250,7 +1251,7 @@ export class TerminalsGrid {
 			if (t.isJournal) {
 				return { kind: 'journal', name: t.name, journalSlug: (t as JournalTile).journalSlug, hidden, worktreePath: '', branch: '', repoName: 'journal', repoPath: '', baseBranch: '' };
 			}
-			return { kind: 'terminal', ...(t as TerminalTile).sessionRecord(), hidden };
+			return { kind: 'terminal', ...(t as TerminalTile).sessionRecord(), hidden, ...(t.lastActivity !== undefined ? { lastActivity: t.lastActivity } : {}) };
 		};
 		// Retained unrestored records — minus any worktree the user has since reopened
 		// as a live tile (the live tile's record supersedes the stale one).
@@ -1321,9 +1322,15 @@ export class TerminalsGrid {
 			let exists = false;
 			try { await fs.access(rec.worktreePath); exists = true; } catch { exists = false; }
 			if (!exists) { this.unrestored.push(rec); return; } // retained — retried next launch
-			const tile = this.makeTile({ worktreePath: rec.worktreePath, branch: rec.branch }, rec.repoName, rec.repoPath, rec.baseBranch, true, rec.name, rec.model, rec.effort);
+			const tile = this.makeTile({ worktreePath: rec.worktreePath, branch: rec.branch }, rec.repoName, rec.repoPath, rec.baseBranch, true, rec.name, rec.model, rec.effort, rec.lastActivity);
 			if (this.stageEl) tile.render(this.stageEl);
-			if (rec.hidden) { tile.setHidden(true); this.hidden.push(tile); }
+			if (rec.hidden) {
+				tile.setHidden(true);
+				// setHidden also stamps (it's the live "hide" action) — reapply the persisted stamp
+				// so a restored-but-untouched hidden session doesn't get bumped to "now" on every boot.
+				if (rec.lastActivity !== undefined) tile.setLastActivity(rec.lastActivity);
+				this.hidden.push(tile);
+			}
 			else this.tiles.push(tile);
 		}
 	}
