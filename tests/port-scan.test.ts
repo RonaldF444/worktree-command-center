@@ -64,4 +64,23 @@ describe('PortScanner', () => {
 			{ url: 'http://localhost:8080/health', host: 'localhost', port: 8080, path: '/health' },
 		]);
 	});
+	it('does not emit truncated URLs at punctuation boundaries', () => {
+		const s = new PortScanner();
+		// URL ends with .json — the . is in the trim set, so without raw length tracking,
+		// the shortened length would make absEnd land short of textEnd, emitting truncated :3000/api.
+		// This would then prevent the real URL from being emitted on the next feed.
+		expect(s.feed('http://localhost:3000/api.')).toEqual([]); // boundary case: held
+		expect(urls(s.feed('json\n'))).toEqual(['http://localhost:3000/api.json']);
+	});
+	it('slides the carry window past CARRY_CHARS without re-reporting', () => {
+		const s = new PortScanner();
+		// Feed a URL, then feed > 256 chars to push absBase forward, then feed the same URL again.
+		// Without proper absBase advancement in absEnd >= textEnd check, a duplicate could be reported.
+		expect(urls(s.feed('http://localhost:3000/api\n'))).toEqual(['http://localhost:3000/api']);
+		// Feed 300 chars of filler to advance absBase > 0 (absBase += text.length - keep.length where keep is 256 chars).
+		const filler = 'x'.repeat(300);
+		expect(s.feed(filler + '\n')).toEqual([]);
+		// Feed the same URL again — must not re-report.
+		expect(urls(s.feed('http://localhost:3000/api\n'))).toEqual(['http://localhost:3000/api']);
+	});
 });

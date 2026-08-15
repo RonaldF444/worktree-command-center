@@ -47,7 +47,7 @@ export function scanText(text: string): ScanMatch[] {
 			url: `${scheme}://${host}:${port}${path}`,
 			host, port, path,
 			index: m.index,
-			length: m[0].length - (rawPath.length - path.length),
+			length: m[0].length,
 		});
 	}
 	return out;
