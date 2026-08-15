@@ -9,6 +9,8 @@ import { UsageProbe } from './terminals/usage-probe';
 import { UsageWidget } from './ui/usage-widget';
 import { PerfMonitor } from './ui/perf-monitor';
 import { AttentionWidget } from './ui/attention-widget';
+import { PortsWidget } from './ui/ports-widget';
+import { openExternalUrl } from './terminals/links';
 import { WorkspaceBar } from './ui/workspace-bar';
 import { normalizeWorkspaces, addWorkspace, closeWorkspace, nextActiveAfter, type Workspace } from './terminals/workspace-store';
 import { THEMES, normalizeTheme, setActiveTheme, activeTerminalPalette } from './terminals/theme-store';
@@ -166,6 +168,10 @@ async function main(): Promise<void> {
 		// must not have their keys clobbered by this startup-snapshot spread.
 		const persist = (): void => void window.wcc.getConfig().then((fresh) => window.wcc.setConfig({ ...fresh, repos, workspaces, activeWorkspace: activeId, theme: themeId }));
 
+		// Reserve the ports badge's position LEFT of ⚠ now; PortsWidget itself is constructed
+		// later (after gridContainer exists, since Task 5's peek pane mounts into it).
+		const portsSlot = topBar.createDiv({ cls: 'wcc-ports-slot' });
+
 		// Attention queue reads whichever grid is ACTIVE (closures over the mutable activeGrid).
 		const attention = new AttentionWidget(() => activeGrid.attentionItems(), (tileId) => activeGrid.revealTile(tileId));
 		attention.render(topBar);
@@ -185,6 +191,15 @@ async function main(): Promise<void> {
 
 		// Grid container: the active grid mounts its controls + board + stage into here.
 		const gridContainer = terminalRoot.createDiv({ cls: 'wcc-grid-container' });
+
+		// Ports list reads whichever grid is ACTIVE, same closure trick as the attention queue.
+		const ports = new PortsWidget(
+			() => activeGrid.portItems(),
+			(tileId) => activeGrid.revealTile(tileId),
+			(url) => openExternalUrl(url), // replaced by the peek pane in the next task
+		);
+		ports.render(portsSlot); // the slot reserved above the grid — keeps it left of ⚠
+		window.addEventListener('beforeunload', () => ports.dispose());
 
 		async function switchTo(id: string): Promise<void> {
 			if (id === activeId || !workspaces.some((w) => w.id === id)) return;

@@ -174,6 +174,20 @@ html, body {
 .wcc-attn-row.state-errored .wcc-attn-state { color: #d2453e; }
 .wcc-attn-empty { padding: 10px 8px; color: var(--text-faint); font-size: 12px; }
 
+.wcc-ports { position: relative; }
+.wcc-ports-btn { background: transparent; border: 1px solid var(--background-modifier-border); color: var(--text-muted); cursor: pointer; font-size: 12px; border-radius: 6px; padding: 3px 9px; }
+.wcc-ports-btn:hover { color: var(--text-normal); }
+.wcc-ports-menu { position: absolute; right: 0; top: 28px; z-index: 1200; min-width: 300px; max-height: 60vh; overflow-y: auto; background: var(--background-secondary); border: 1px solid var(--background-modifier-border); border-radius: 8px; box-shadow: 0 8px 28px rgba(0,0,0,.45); padding: 6px; }
+.wcc-ports-group { font-size: 10px; text-transform: uppercase; letter-spacing: .5px; color: var(--text-faint); padding: 6px 8px 2px; }
+.wcc-ports-row { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 6px; cursor: pointer; font-size: 12px; }
+.wcc-ports-row:hover { background: var(--background-modifier-hover); }
+.wcc-ports-port { font-variant-numeric: tabular-nums; font-weight: 600; color: var(--text-normal); }
+.wcc-ports-path { color: var(--text-muted); flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wcc-ports-name { color: var(--text-faint); max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wcc-ports-name:hover { color: var(--text-normal); text-decoration: underline; }
+.wcc-ports-peek { padding: 1px 6px !important; font-size: 11px !important; }
+.wcc-ports-empty { color: var(--text-faint); font-size: 12px; padding: 8px; }
+
 /* Workspace tab bar. */
 .wcc-tabs { display: flex; align-items: stretch; gap: 4px; padding: 6px 12px 0; flex: 0 0 auto; flex-wrap: wrap; }
 .wcc-tab { display: flex; align-items: center; gap: 6px; padding: 5px 12px; border: 1px solid var(--background-modifier-border); border-bottom: none; border-radius: 7px 7px 0 0; background: var(--background-secondary); color: var(--text-muted); cursor: pointer; font-size: 12px; }
