@@ -10,7 +10,7 @@ import { UsageWidget } from './ui/usage-widget';
 import { PerfMonitor } from './ui/perf-monitor';
 import { AttentionWidget } from './ui/attention-widget';
 import { PortsWidget } from './ui/ports-widget';
-import { openExternalUrl } from './terminals/links';
+import { PeekPane } from './ui/peek-pane';
 import { WorkspaceBar } from './ui/workspace-bar';
 import { normalizeWorkspaces, addWorkspace, closeWorkspace, nextActiveAfter, type Workspace } from './terminals/workspace-store';
 import { THEMES, normalizeTheme, setActiveTheme, activeTerminalPalette } from './terminals/theme-store';
@@ -193,13 +193,15 @@ async function main(): Promise<void> {
 		const gridContainer = terminalRoot.createDiv({ cls: 'wcc-grid-container' });
 
 		// Ports list reads whichever grid is ACTIVE, same closure trick as the attention queue.
+		const peek = new PeekPane();
+		peek.mount(gridContainer); // .wcc-grid-container is position:relative — the overlay's anchor
 		const ports = new PortsWidget(
 			() => activeGrid.portItems(),
 			(tileId) => activeGrid.revealTile(tileId),
-			(url) => openExternalUrl(url), // replaced by the peek pane in the next task
+			(url) => peek.show(url),
 		);
 		ports.render(portsSlot); // the slot reserved above the grid — keeps it left of ⚠
-		window.addEventListener('beforeunload', () => ports.dispose());
+		window.addEventListener('beforeunload', () => { ports.dispose(); peek.dispose(); });
 
 		async function switchTo(id: string): Promise<void> {
 			if (id === activeId || !workspaces.some((w) => w.id === id)) return;

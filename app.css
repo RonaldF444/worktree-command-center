@@ -188,6 +188,12 @@ html, body {
 .wcc-ports-peek { padding: 1px 6px !important; font-size: 11px !important; }
 .wcc-ports-empty { color: var(--text-faint); font-size: 12px; padding: 8px; }
 
+.wcc-peek { position: absolute; top: 0; right: 0; bottom: 0; width: 40%; min-width: 360px; z-index: 1100; display: flex; flex-direction: column; background: var(--background-primary); border-left: 1px solid var(--background-modifier-border); box-shadow: -8px 0 28px rgba(0,0,0,.45); }
+.wcc-peek-head { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-bottom: 1px solid var(--background-modifier-border); background: var(--background-secondary); }
+.wcc-peek-url { flex: 1 1 auto; font-size: 12px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wcc-peek-btns { display: flex; gap: 4px; }
+.wcc-peek-view { flex: 1 1 auto; width: 100%; border: 0; background: #fff; }
+
 /* Workspace tab bar. */
 .wcc-tabs { display: flex; align-items: stretch; gap: 4px; padding: 6px 12px 0; flex: 0 0 auto; flex-wrap: wrap; }
 .wcc-tab { display: flex; align-items: center; gap: 6px; padding: 5px 12px; border: 1px solid var(--background-modifier-border); border-bottom: none; border-radius: 7px 7px 0 0; background: var(--background-secondary); color: var(--text-muted); cursor: pointer; font-size: 12px; }
@@ -332,6 +338,7 @@ html, body {
 }
 :root[data-theme="olympus"] .wcc-usage-pop,
 :root[data-theme="olympus"] .wcc-attn-menu,
+:root[data-theme="olympus"] .wcc-ports-menu,
 :root[data-theme="olympus"] .wcc-phone-panel {
 	border: 2px solid #0b0b0b;
 	border-radius: 0;
@@ -456,6 +463,7 @@ html, body {
 }
 :root[data-theme="iris"] .wcc-usage-pop,
 :root[data-theme="iris"] .wcc-attn-menu,
+:root[data-theme="iris"] .wcc-ports-menu,
 :root[data-theme="iris"] .wcc-phone-panel {
 	border: 1px solid #6d3fd1;
 	box-shadow: 0 8px 28px rgba(0, 0, 0, 0.6), 0 0 18px rgba(255, 79, 216, 0.25);
