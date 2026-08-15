@@ -16,6 +16,7 @@ import { ctrlClickActivator, openExternalUrl } from './links';
 import { promptForConfirm } from '../ui/prompt-dialog';
 import type { StageTile } from './stage-tile';
 import { shouldStampOutput } from './session-purge';
+import { PortScanner, type PortHit } from './port-scan';
 
 export interface TerminalTileOpts {
 	tileId: number;
@@ -34,6 +35,7 @@ export interface TerminalTileOpts {
 	onEnter?: (tile: TerminalTile) => void;
 	onFocusChange?: (tile: TerminalTile, focused: boolean) => void;
 	onReady?: (tile: TerminalTile) => void;
+	onPortSeen?: (tile: TerminalTile, hit: PortHit) => void;
 	resume?: boolean;
 	bypassPermissions?: boolean;
 	model?: string;
@@ -71,6 +73,7 @@ export class TerminalTile implements StageTile {
 	private detachedFromStage = false;
 	private currentMode: 'live' | 'visible' | 'suspended' = 'live';
 	private hiddenBuf = new HiddenOutputBuffer();
+	private portScanner = new PortScanner();
 	private flushTimer: number | null = null;
 	readonly isJournal = false;
 	private spawnedAtMs = Date.now();
@@ -358,6 +361,9 @@ export class TerminalTile implements StageTile {
 
 	/** Route session output to xterm — or, in a batching mode, into the pending buffer. */
 	private writeOut(d: string): void {
+		// Scan BEFORE the mode branch: hidden and suspended tiles still print dev-server URLs,
+		// and their ports belong in the list exactly like a foreground tile's.
+		if (this.opts.onPortSeen) for (const hit of this.portScanner.feed(d)) this.opts.onPortSeen(this, hit);
 		if (this.currentMode !== 'live') this.hiddenBuf.push(d);
 		else this.term?.write(d);
 	}

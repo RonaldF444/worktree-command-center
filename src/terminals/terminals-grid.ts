@@ -25,6 +25,7 @@ import { JournalStore } from './journal-store';
 import { FormatProbe } from './format-probe';
 import { LinearConvertProbe, type LinearConvertConfig } from './linear-convert-probe';
 import type { StageTile } from './stage-tile';
+import { PortRegistry, type PortItem } from './port-registry';
 import { KANE_ID } from '../../electron/remote-actions';
 
 export interface RepoConfig { name: string; path: string; remote?: string; group?: string; }
@@ -137,6 +138,7 @@ export class TerminalsGrid {
 	private watchers: Array<{ target: string; note: string }> = [];
 	private pendingTask = new Map<number, string>();
 	private idleTiles = new Set<number>();
+	private ports = new PortRegistry();
 	private stageWrapEl: HTMLElement | null = null;
 	private floorTimer: number | null = null;
 	private spotlightTimer: number | null = null;
@@ -607,6 +609,23 @@ export class TerminalsGrid {
 			id: t.tileId, name: t.name, repo: this.repoNameFor(t),
 			output: t.recentOutput(), idle: this.idleTiles.has(t.tileId),
 		})));
+	}
+
+	/** Snapshot of every live dev server, with the terminal + repo that owns it, for the
+	 *  topbar ports list. Entries whose tile has gone are dropped defensively — forget() on
+	 *  close should already have removed them. */
+	portItems(): PortItem[] {
+		const byId = new Map(this.allSessions().map((t) => [t.tileId, t]));
+		const out: PortItem[] = [];
+		for (const e of this.ports.list()) {
+			const t = byId.get(e.tileId);
+			if (!t) continue;
+			out.push({ ...e, name: t.name, repo: this.repoNameFor(t) });
+		}
+		// Sort by REPO first: the widget emits a heading whenever the repo changes, so two
+		// terminals of one repo must be contiguous even when another repo's tile sits between
+		// them by id. Registry order (tile, port) cannot do this — repo is a grid-level concept.
+		return out.sort((a, b) => a.repo.localeCompare(b.repo) || a.tileId - b.tileId || a.port - b.port);
 	}
 
 	/** Jump to a terminal by id: un-hide it if hidden, else center + focus it. */
@@ -1207,11 +1226,12 @@ export class TerminalsGrid {
 			onRequestRename: (t, cur) => {
 				void this.deps.promptForTopic('Rename terminal', 'New name', cur, 'Rename').then((name) => { if (name && name.trim()) t.setName(name.trim()); });
 			},
-			onClosed: (t) => { this.idleTiles.delete(t.tileId); if (this.lockedTileId === t.tileId) this.lockedTileId = null; if (this.centeredId === t.tileId) this.centeredId = null; this.q = rqClose(this.q, t.tileId).state; this.tiles = this.tiles.filter((x) => x !== t); void this.persist(); this.applyLayout(); this.autoCenter(); },
+			onClosed: (t) => { this.ports.forget(t.tileId); this.idleTiles.delete(t.tileId); if (this.lockedTileId === t.tileId) this.lockedTileId = null; if (this.centeredId === t.tileId) this.centeredId = null; this.q = rqClose(this.q, t.tileId).state; this.tiles = this.tiles.filter((x) => x !== t); void this.persist(); this.applyLayout(); this.autoCenter(); },
 			onHide: (t) => this.hideTile(t),
 			onLock: (t) => this.toggleLockById(t.tileId),
 			onCenter: (t) => this.handleClick(t.tileId),
 			onReady: (t) => this.handleReady(t),
+			onPortSeen: (t, hit) => this.ports.note(t.tileId, hit, Date.now()),
 			onInput: (t, data) => { this.idleTiles.delete(t.tileId); this.lastActivityAt = Date.now(); this.q.composingLen = applyKeystroke(this.q.composingLen, data); },
 			onEnter: (t) => this.handleSubmit(t),
 			// Reset the typing-hold on ANY focus change: gaining focus starts a fresh box,
