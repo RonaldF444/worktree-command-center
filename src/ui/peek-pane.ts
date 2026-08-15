@@ -36,6 +36,23 @@ export class PeekPane {
 		this.el.appendChild(view);
 		this.view = view;
 
+		// The header must track what the guest is actually showing, not the URL the pane was
+		// opened with — a dev server can redirect (/ -> /login), bounce through OAuth, or the
+		// user can click an in-page link. Without this the ⧉ button would reopen a stale URL
+		// instead of the page on screen, defeating the "peek graduates into a real tab" point.
+		// 'about:blank' is close()'s own reset sentinel, never a page a user peeked at, so it
+		// must not resurrect the header after the pane has already been closed.
+		const onNavigate = (e: Event) => {
+			const url = (e as Event & { url: string }).url;
+			if (url === 'about:blank') return;
+			this.url = url;
+			this.urlEl?.setText(this.url);
+		};
+		view.addEventListener('did-navigate', onNavigate);
+		// Most dev servers client-side route (hash changes, pushState/replaceState), which never
+		// fires did-navigate — only this event does, so it needs the same handler to keep up.
+		view.addEventListener('did-navigate-in-page', onNavigate);
+
 		// Esc closes — but only when focus is OUTSIDE the guest. A focused webview swallows keys
 		// before the host sees them (main.ts mirrors F11/Ctrl+digit for exactly this reason), so
 		// the × button is the reliable close once you have clicked into the page.
