@@ -605,6 +605,7 @@ export class TerminalTile implements StageTile {
 			if (fallbackFresh && /no conversation found to continue/i.test(probe)) {
 				this.hiddenBuf.clear();      // stale pre-reset output must not replay after the reset
 				this.term?.reset();          // --continue had nothing to resume → start fresh in place
+				this.portScanner = new PortScanner(); // same reasoning as restartInPlace: this is a fresh stream too
 				this.startSession(false);
 				return;
 			}
@@ -636,6 +637,7 @@ export class TerminalTile implements StageTile {
 		this.bridge?.kill();
 		this.hiddenBuf.clear(); // old-session output must not replay into the fresh screen
 		this.term?.reset();
+		this.portScanner = new PortScanner(); // a restarted session is a fresh stream — stale carry must not stitch across the kill
 		this.idle = false;
 		this.startSession(true, true);
 	}
