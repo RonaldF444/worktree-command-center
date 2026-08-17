@@ -188,11 +188,35 @@ html, body {
 .wcc-ports-peek { padding: 1px 6px !important; font-size: 11px !important; }
 .wcc-ports-empty { color: var(--text-faint); font-size: 12px; padding: 8px; }
 
-.wcc-peek { position: absolute; top: 0; right: 0; bottom: 0; width: 40%; min-width: 360px; z-index: 1100; display: flex; flex-direction: column; background: var(--background-primary); border-left: 1px solid var(--background-modifier-border); box-shadow: -8px 0 28px rgba(0,0,0,.45); }
-.wcc-peek-head { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-bottom: 1px solid var(--background-modifier-border); background: var(--background-secondary); }
+/* Free-floating: left/top/width/height are set inline by PeekPane from pane-geometry. */
+.wcc-peek { position: absolute; z-index: 1100; display: flex; flex-direction: column; overflow: hidden; background: var(--background-primary); border: 1px solid var(--background-modifier-border); border-radius: 8px; box-shadow: 0 10px 34px rgba(0,0,0,.5); }
+.wcc-peek.is-max { border-radius: 0; }
+.wcc-peek-head { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-bottom: 1px solid var(--background-modifier-border); background: var(--background-secondary); cursor: move; user-select: none; flex: 0 0 auto; }
 .wcc-peek-url { flex: 1 1 auto; font-size: 12px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wcc-peek-btns { display: flex; gap: 4px; }
-.wcc-peek-view { flex: 1 1 auto; width: 100%; border: 0; background: #fff; }
+/* The 6px gutter is load-bearing, not decoration: it gives the resize handles somewhere to live
+   that is NOT on top of the <webview>. An Electron guest can composite above ordinary DOM, so a
+   handle overlapping it may never receive the pointerdown that starts a resize. */
+.wcc-peek-view { flex: 1 1 auto; width: auto; margin: 0 6px 6px; border: 0; background: #fff; }
+
+/* Collapsed to its header: the guest stays loaded (unlike close), so restoring is instant. */
+.wcc-peek.is-min .wcc-peek-view,
+.wcc-peek.is-min .wcc-peek-h { display: none; }
+.wcc-peek.is-min .wcc-peek-head { border-bottom: 0; }
+
+/* Handles sit inside the pane (overflow is hidden, so anything outside would be clipped) and
+   above it, mostly over the gutter. Corners are declared last and are larger, so a corner wins
+   over the two edges it overlaps. */
+.wcc-peek-h { position: absolute; z-index: 3; }
+.wcc-peek-h-n { top: 0; left: 0; right: 0; height: 8px; cursor: ns-resize; }
+.wcc-peek-h-s { bottom: 0; left: 0; right: 0; height: 8px; cursor: ns-resize; }
+.wcc-peek-h-w { left: 0; top: 0; bottom: 0; width: 8px; cursor: ew-resize; }
+.wcc-peek-h-e { right: 0; top: 0; bottom: 0; width: 8px; cursor: ew-resize; }
+.wcc-peek-h-nw { top: 0; left: 0; width: 16px; height: 16px; cursor: nwse-resize; }
+.wcc-peek-h-ne { top: 0; right: 0; width: 16px; height: 16px; cursor: nesw-resize; }
+.wcc-peek-h-sw { bottom: 0; left: 0; width: 16px; height: 16px; cursor: nesw-resize; }
+.wcc-peek-h-se { bottom: 0; right: 0; width: 16px; height: 16px; cursor: nwse-resize; }
+.wcc-peek.is-max .wcc-peek-h { display: none; }
 
 /* Workspace tab bar. */
 .wcc-tabs { display: flex; align-items: stretch; gap: 4px; padding: 6px 12px 0; flex: 0 0 auto; flex-wrap: wrap; }
