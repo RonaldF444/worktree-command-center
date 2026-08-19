@@ -26,6 +26,10 @@ function send(obj) { process.stdout.write(JSON.stringify(obj) + '\n'); }
 let term;
 try {
   term = pty.spawn(file, args, { name: 'xterm-256color', cols: 80, rows: 24, cwd, env: process.env });
+  // Report the PTY child's PID so the dashboard can tree-kill it on close. On Windows the
+  // ConPTY child is parented to the pty host, not this sidecar, so the sidecar's own
+  // taskkill /T never reaches it — the claude session (+ its MCP children) would otherwise leak.
+  try { send({ t: 'pid', pid: term.pid }); } catch (_) { /* best effort */ }
 } catch (e) {
   send({ t: 'data', d: Buffer.from('failed to spawn ' + command + ': ' + e.message + '\r\n').toString('base64') });
   send({ t: 'exit', code: 1 });

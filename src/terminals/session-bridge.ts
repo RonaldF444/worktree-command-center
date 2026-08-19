@@ -30,6 +30,9 @@ export class SessionBridge {
 	private onDataCb: ((utf8: string) => void) | null = null;
 	private onExitCb: ((code: number | null) => void) | null = null;
 	private onReadyCb: (() => void) | null = null;
+	/** PID of the sidecar's PTY child (claude/cmd). On Windows the ConPTY child escapes the
+	 *  sidecar's process tree, so kill() must tree-kill this PID directly or it leaks. */
+	private childPid: number | undefined;
 
 	constructor(
 		private sidecarPath: string,
@@ -65,6 +68,14 @@ export class SessionBridge {
 	}
 
 	kill(): void {
+		// Tree-kill the PTY child FIRST — on Windows the ConPTY child (claude + its MCP-server
+		// children) is NOT in the sidecar's process tree, so killing only the sidecar leaks it.
+		// childPid is reported by the sidecar right after pty.spawn.
+		const child = this.childPid;
+		this.childPid = undefined;
+		if (child !== undefined && process.platform === 'win32') {
+			spawn('taskkill', ['/pid', String(child), '/T', '/F'], { windowsHide: true });
+		}
 		const pid = this.proc?.pid;
 		if (pid === undefined) return;
 		if (process.platform === 'win32') spawn('taskkill', ['/pid', String(pid), '/T', '/F'], { windowsHide: true });
@@ -86,6 +97,8 @@ export class SessionBridge {
 				this.onExitCb?.(typeof f.code === 'number' ? f.code : 0);
 			} else if (f.t === 'ready') {
 				this.onReadyCb?.();
+			} else if (f.t === 'pid' && typeof f.pid === 'number') {
+				this.childPid = f.pid;
 			}
 		}
 	}
