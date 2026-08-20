@@ -1,7 +1,9 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'http';
+import type { AddressInfo } from 'net';
 import { randomBytes } from 'crypto';
 import { ipcMain, type BrowserWindow } from 'electron';
 import { parseRemoteAction } from './remote-actions';
+import { remoteInfoPath, writeRemoteInfo } from './remote-info';
 
 export interface RemoteServerOpts { port: number; getWindow: () => BrowserWindow | null; }
 
@@ -22,7 +24,7 @@ export function startRemoteServer(opts: RemoteServerOpts): { token: string } {
 		res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(body));
 	};
 
-	createServer((req, res) => {
+	const server = createServer((req, res) => {
 		const path = (req.url ?? '/').split('?')[0];
 		if (req.method === 'GET' && path === '/') {
 			res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); res.end(MOBILE_HTML); return;
@@ -46,8 +48,14 @@ export function startRemoteServer(opts: RemoteServerOpts): { token: string } {
 			json(res, 404, { error: 'not found' }); return;
 		}
 		res.writeHead(404); res.end('not found');
-	}).listen(opts.port, '0.0.0.0', () => console.log(`[remote] phone floor on :${opts.port}`))
-		.on('error', (e) => console.error('[remote] server error:', e));
+	});
+	server.listen(opts.port, '0.0.0.0', () => {
+		console.log(`[remote] phone floor on :${opts.port}`);
+		const addr = server.address();
+		const boundPort = addr && typeof addr === 'object' ? (addr as AddressInfo).port : opts.port;
+		writeRemoteInfo(remoteInfoPath(), { url: `http://127.0.0.1:${boundPort}`, token });
+	});
+	server.on('error', (e) => console.error('[remote] server error:', e));
 
 	return { token };
 }

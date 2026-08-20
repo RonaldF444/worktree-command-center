@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
 import { startRemoteServer } from './remote-server';
+import { remoteInfoPath, removeRemoteInfo } from './remote-info';
 import { pickHosts, accessUrls, httpsUrlFor, hasServeHandlerFor } from './remote-net';
 import { Worker } from 'worker_threads';
 
@@ -244,3 +245,7 @@ app.on('activate', () => {
 app.on('window-all-closed', () => {
 	if (process.platform !== 'darwin') app.quit();
 });
+
+// Drop the phone-floor access file so a stale token doesn't linger pointing at a dead port
+// once this process exits.
+app.on('before-quit', () => removeRemoteInfo(remoteInfoPath()));
