@@ -25,6 +25,23 @@ const OUT = 'release-private';
 const EXE = 'Worktree Command Center.exe';
 const run = (cmd) => execSync(cmd, { stdio: 'inherit' });
 
+// ─── FLOOR GUARD (Kane, 2026-08-23) ──────────────────────────────────────────
+// A silent reinstall force-kills the running app (the taskkill below), and the
+// app is the parent of EVERY live Claude terminal in every workspace - so one
+// install nukes the whole floor mid-turn. It happened twice on 2026-08-23
+// (board: app:install 14:03 and 18:56); each time every session died at once.
+// Installing is only allowed when the app is not running, or when Ronald has
+// explicitly approved the install IN THE CURRENT CONVERSATION. After his OK,
+// re-run with the env var WCC_INSTALL_OK=1.
+const appUp = spawnSync('tasklist', ['/FI', `IMAGENAME eq ${EXE}`], { encoding: 'utf8' })
+	.stdout?.includes(EXE);
+if (appUp && process.env.WCC_INSTALL_OK !== '1') {
+	console.error(`[install-local] REFUSING: "${EXE}" is running. Installing now would kill every`);
+	console.error('[install-local] live Claude session on the floor. Ask Ronald for an explicit OK in this');
+	console.error('[install-local] conversation, then re-run with WCC_INSTALL_OK=1 set.');
+	process.exit(2);
+}
+
 console.log(existsSync('private/index.ts')
 	? '[install-local] private/ overlay present — compiling it in'
 	: '[install-local] no private/ overlay — building the public app');
