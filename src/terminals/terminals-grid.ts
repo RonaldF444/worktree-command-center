@@ -19,6 +19,7 @@ import { GodConsole } from './god-console';
 import { slug as godSlug, formatFloorSnapshot, formatFloorIndex, parseOutboxMessage, resolveTellTarget, remapWatchers, EFFORT_LEVELS, type OutboxMessage, type GodSelfImprove } from './god';
 import { looksLikeMenu, looksErrored, looksBusy } from './prompt-detect';
 import { looksLikePrompt } from './chat-room';
+import type { FloorTile, FloorKane } from './floor-state';
 import { classifyAttention, type AttentionItem } from './attention';
 import { JournalTile } from './journal-tile';
 import { JournalStore } from './journal-store';
@@ -54,6 +55,10 @@ export interface GridDeps {
 	godSelfImprove?: GodSelfImprove;
 	toast: (msg: string) => void;
 	promptForTopic: (title: string, placeholder: string, initial?: string, okLabel?: string) => Promise<string | null>;
+	onTileOutput?: (id: number | 'kane', chunk: string) => void;
+	onTileRestart?: (id: number | 'kane') => void;
+	onTileGone?: (id: number) => void;
+	onFloorChange?: () => void;
 }
 interface SessionRecord { worktreePath: string; branch: string; repoName: string; repoPath: string; baseBranch: string; name?: string; hidden?: boolean; kind?: 'terminal' | 'journal' | 'god'; journalSlug?: string; model?: string; effort?: string; lastActivity?: number; }
 
@@ -704,6 +709,45 @@ export class TerminalsGrid {
 		(tile as TerminalTile).sendLine(text);
 	}
 
+	/** Browser mirror: every session with the fields the browser needs to draw a tile. */
+	fullFloorState(): { centeredId: number | null; terminals: FloorTile[]; kane: FloorKane | null } {
+		const hiddenIds = new Set(this.hidden.map((t) => t.tileId));
+		const terminals: FloorTile[] = (this.allSessions().filter((t) => !t.isJournal) as TerminalTile[]).map((t) => ({
+			id: t.tileId, name: t.name, repo: this.repoNameFor(t), branch: t.branch, state: this.tileState(t),
+			remoteOn: t.isRemoteOn, hidden: hiddenIds.has(t.tileId), cols: t.dims.cols, rows: t.dims.rows,
+			model: t.model, effort: t.effort, locked: this.lockedTileId === t.tileId,
+		}));
+		const k = this.godConsole;
+		const ko = k?.recentOutput();
+		const kane: FloorKane | null = !k || ko === undefined ? null
+			: { name: KANE_NAME, state: looksLikePrompt(ko) ? 'prompt' : looksLikeMenu(ko) ? 'menu' : 'running', cols: k.dims.cols, rows: k.dims.rows, visible: this.godVisible };
+		return { centeredId: this.centeredId, terminals, kane };
+	}
+	get lockedId(): number | null { return this.lockedTileId; }
+	private terminalById(id: number): TerminalTile | null {
+		const t = this.allSessions().find((x) => x.tileId === id);
+		return t && !t.isJournal ? (t as TerminalTile) : null;
+	}
+	writeToId(id: number, data: string): boolean { const t = this.terminalById(id); if (!t) return false; t.sendKeys(data); return true; }
+	kaneWrite(data: string): boolean { if (!this.godConsole) return false; this.godConsole.write(data); return true; }
+	renameById(id: number, name: string): boolean { const t = this.terminalById(id); if (!t) return false; t.setName(name); return true; }
+	hideById(id: number): boolean { const t = this.tiles.find((x) => x.tileId === id); if (!t) return false; this.hideTile(t); return true; }
+	showById(id: number): boolean { if (!this.hidden.some((t) => t.tileId === id)) return false; this.showTile(id); return true; }
+	/** × from the browser: same as the tile's own × — kill + delete worktree + branch, no confirm. */
+	async closeById(id: number): Promise<boolean> {
+		const t = this.terminalById(id);
+		if (!t) return false;
+		if (this.hidden.includes(t)) { this.hidden = this.hidden.filter((x) => x !== t); this.idleTiles.delete(id); if (this.lockedTileId === id) this.lockedTileId = null; }
+		await t.close(); // fires onClosed for stage tiles; for hidden ones the filter above did the bookkeeping
+		void this.persist(); this.board?.refresh(); this.deps.onFloorChange?.();
+		return true;
+	}
+	boardSummary(): { hidden: Array<{ id: number; name: string; branch: string; repo: string }>; registry: string } {
+		let registry = '';
+		try { registry = fsSync.readFileSync(this.registryPath(), 'utf8'); } catch { /* not written yet */ }
+		return { hidden: this.hidden.map((t) => ({ id: t.tileId, name: t.name, branch: t.branch, repo: t.repoName })), registry };
+	}
+
 	/** Spawn a worktree terminal for a repo by name, on a base, with a kickoff task. Model/effort
 	 *  override the toolbar dropdowns when given (spawnWorktree applies the fallback); name
 	 *  overrides the default branch-derived terminal name. */
@@ -728,7 +772,7 @@ export class TerminalsGrid {
 		if (!this.godConsole) {
 			const godHomeDir = path.join(this.coordDir, '..', '.god', this.deps.group);
 			const kane: GodConsole = new GodConsole(
-				{ repos: this.repos.map((r) => ({ name: r.name, path: r.path })), coordDir: this.coordDir, sidecarPath: this.sidecarPath, godHomeDir, sessionEnv: this.deps.sessionEnv, selfImprove: this.deps.godSelfImprove, resume: true, onFocusChange: (f) => { this.focusedKane = f ? kane : (this.focusedKane === kane ? null : this.focusedKane); } },
+				{ repos: this.repos.map((r) => ({ name: r.name, path: r.path })), coordDir: this.coordDir, sidecarPath: this.sidecarPath, godHomeDir, sessionEnv: this.deps.sessionEnv, selfImprove: this.deps.godSelfImprove, resume: true, onFocusChange: (f) => { this.focusedKane = f ? kane : (this.focusedKane === kane ? null : this.focusedKane); }, onOutput: (chunk) => this.deps.onTileOutput?.('kane', chunk), onRestart: () => this.deps.onTileRestart?.('kane') },
 				() => this.hideGod(),
 			);
 			this.godConsole = kane;
@@ -805,6 +849,7 @@ export class TerminalsGrid {
 		this.startFloorFeed();
 		this.godBtn?.toggleClass('cos-god-on', true);
 		this.applyLayout();
+		this.deps.onFloorChange?.();
 	}
 
 	private hideGod(): void {
@@ -815,6 +860,7 @@ export class TerminalsGrid {
 		// is started on GOD-console create/show and stopped only in dispose().
 		this.godBtn?.toggleClass('cos-god-on', false);
 		this.applyLayout();
+		this.deps.onFloorChange?.();
 	}
 
 	private floorDir(): string { return path.join(this.coordDir, 'floor'); }
@@ -1021,6 +1067,7 @@ export class TerminalsGrid {
 		}
 		if (this.stageEl.classList.contains('alt-on')) this.refreshBadges();
 		if (this.searchQuery) this.refreshSearch(); // keep newly-laid-out tiles consistent with the filter
+		this.deps.onFloorChange?.();
 	}
 
 	private setMaximized(on: boolean): void {
@@ -1119,9 +1166,11 @@ export class TerminalsGrid {
 		if (r.added && !engaged && t.tileId !== this.centeredId) {
 			this.q = { ...this.q, pinnedId: null }; // a steal supersedes a manual pin
 			this.doCenter(t.tileId);
+			this.deps.onFloorChange?.();
 			return;
 		}
 		this.autoCenter();
+		this.deps.onFloorChange?.();
 	}
 
 	private handleSubmit(t: TerminalTile): void {
@@ -1208,11 +1257,13 @@ export class TerminalsGrid {
 			effort,
 			name,
 			initialLastActivity,
-			onRename: () => { void this.persist(); },
+			onOutput: (t, chunk) => this.deps.onTileOutput?.(t.tileId, chunk),
+			onRestart: (t) => this.deps.onTileRestart?.(t.tileId),
+			onRename: () => { void this.persist(); this.deps.onFloorChange?.(); },
 			onRequestRename: (t, cur) => {
 				void this.deps.promptForTopic('Rename terminal', 'New name', cur, 'Rename').then((name) => { if (name && name.trim()) t.setName(name.trim()); });
 			},
-			onClosed: (t) => { this.ports.forget(t.tileId); this.idleTiles.delete(t.tileId); if (this.lockedTileId === t.tileId) this.lockedTileId = null; if (this.centeredId === t.tileId) this.centeredId = null; this.q = rqClose(this.q, t.tileId).state; this.tiles = this.tiles.filter((x) => x !== t); void this.persist(); this.applyLayout(); this.autoCenter(); },
+			onClosed: (t) => { this.ports.forget(t.tileId); this.idleTiles.delete(t.tileId); if (this.lockedTileId === t.tileId) this.lockedTileId = null; if (this.centeredId === t.tileId) this.centeredId = null; this.q = rqClose(this.q, t.tileId).state; this.tiles = this.tiles.filter((x) => x !== t); this.deps.onTileGone?.(t.tileId); void this.persist(); this.applyLayout(); this.autoCenter(); },
 			onHide: (t) => this.hideTile(t),
 			onLock: (t) => this.toggleLockById(t.tileId),
 			onCenter: (t) => this.handleClick(t.tileId),

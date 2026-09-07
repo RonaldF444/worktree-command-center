@@ -44,6 +44,9 @@ export interface TerminalTileOpts {
 	onRename?: (tile: TerminalTile, name: string) => void;
 	onRequestRename?: (tile: TerminalTile, currentName: string) => void;
 	initialLastActivity?: number;
+	/** Remote mirror taps (see remote-tap.ts): every output chunk, and each in-place restart. */
+	onOutput?: (tile: TerminalTile, chunk: string) => void;
+	onRestart?: (tile: TerminalTile) => void;
 }
 
 /** One embedded claude terminal (xterm) bound to a sidecar session + worktree. */
@@ -361,6 +364,7 @@ export class TerminalTile implements StageTile {
 
 	/** Route session output to xterm — or, in a batching mode, into the pending buffer. */
 	private writeOut(d: string): void {
+		this.opts.onOutput?.(this, d);
 		// Scan BEFORE the mode branch: hidden and suspended tiles still print dev-server URLs,
 		// and their ports belong in the list exactly like a foreground tile's.
 		if (this.opts.onPortSeen) for (const hit of this.portScanner.feed(d)) this.opts.onPortSeen(this, hit);
@@ -441,6 +445,9 @@ export class TerminalTile implements StageTile {
 	get branch(): string { return this.opts.worktree.branch; }
 	get baseBranch(): string { return this.opts.baseBranch; }
 	get repoName(): string { return this.opts.repoName; }
+	get dims(): { cols: number; rows: number } { return { cols: this.term?.cols ?? 80, rows: this.term?.rows ?? 24 }; }
+	get model(): string | null { return this.opts.model ?? null; }
+	get effort(): string | null { return this.opts.effort ?? null; }
 
 	/** Toggle the room-selection highlight. */
 	setSelected(on: boolean): void {
@@ -605,6 +612,7 @@ export class TerminalTile implements StageTile {
 			if (fallbackFresh && /no conversation found to continue/i.test(probe)) {
 				this.hiddenBuf.clear();      // stale pre-reset output must not replay after the reset
 				this.term?.reset();          // --continue had nothing to resume → start fresh in place
+				this.opts.onRestart?.(this);
 				this.portScanner = new PortScanner(); // same reasoning as restartInPlace: this is a fresh stream too
 				this.startSession(false);
 				return;
@@ -637,6 +645,7 @@ export class TerminalTile implements StageTile {
 		this.bridge?.kill();
 		this.hiddenBuf.clear(); // old-session output must not replay into the fresh screen
 		this.term?.reset();
+		this.opts.onRestart?.(this);
 		this.portScanner = new PortScanner(); // a restarted session is a fresh stream — stale carry must not stitch across the kill
 		this.idle = false;
 		this.startSession(true, true);

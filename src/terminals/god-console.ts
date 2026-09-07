@@ -24,6 +24,9 @@ export interface GodConsoleOpts {
 	instanceName?: string;   // head label + COS_TERMINAL_NAME (default 'Kane')
 	terminalId?: string;     // COS_TERMINAL_ID for cos-coord identity (default '0')
 	resume?: boolean;        // open with --continue (fresh fallback) — the main Kane sets this
+	/** Remote mirror taps (see remote-tap.ts): every output chunk, and each in-place restart. */
+	onOutput?: (chunk: string) => void;
+	onRestart?: () => void;
 }
 
 /** GOD: a single privileged claude session in a docked side panel. Real terminal — the
@@ -192,14 +195,17 @@ export class GodConsole {
 		fs.mkdirSync(this.opts.godHomeDir, { recursive: true });
 		let probe = ''; // first bytes only (capped) — detect the --continue "no conversation" exit
 		this.bridge = new SessionBridge(this.opts.sidecarPath, this.opts.godHomeDir, 'claude', args, env);
-		this.bridge.onData((d) => { if (fallbackFresh && probe.length < 2048) probe += d; this.term?.write(d); this.markBusy(); });
+		this.bridge.onData((d) => { if (fallbackFresh && probe.length < 2048) probe += d; this.opts.onOutput?.(d); this.term?.write(d); this.markBusy(); });
 		this.bridge.onExit((code) => {
 			if (fallbackFresh && /no conversation found to continue/i.test(probe)) {
 				this.term?.reset();          // --continue had nothing to resume → start fresh in place
+				this.opts.onRestart?.();
 				this.startSession(false);
 				return;
 			}
-			this.term?.write(`\r\n[${this.opts.instanceName ?? 'Kane'} session ended (code ${code ?? '?'})]\r\n`);
+			const end = `\r\n[${this.opts.instanceName ?? 'Kane'} session ended (code ${code ?? '?'})]\r\n`;
+			this.opts.onOutput?.(end);
+			this.term?.write(end);
 		});
 		this.bridge.start();
 	}
@@ -240,6 +246,7 @@ export class GodConsole {
 		this.busy = false;
 		this.bridge?.kill();
 		this.term?.reset();
+		this.opts.onRestart?.();
 		this.startSession(true, true); // try --continue; if no conversation, fall back to a fresh session
 	}
 
@@ -251,6 +258,10 @@ export class GodConsole {
 	}
 
 	focus(): void { this.term?.focus(); }
+	get dims(): { cols: number; rows: number } { return { cols: this.term?.cols ?? 80, rows: this.term?.rows ?? 24 }; }
+	get visible(): boolean { return !!this.el && this.el.style.display !== 'none'; }
+	/** Raw keystrokes from the browser mirror (no auto-Enter). */
+	write(raw: string): void { this.bridge?.write(raw); }
 	blur(): void { this.term?.blur(); }
 
 	/** Last ≤20 non-blank lines of Kane's buffer — for the phone floor view. */

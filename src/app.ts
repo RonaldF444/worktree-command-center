@@ -15,6 +15,8 @@ import { WorkspaceBar } from './ui/workspace-bar';
 import { normalizeWorkspaces, addWorkspace, closeWorkspace, nextActiveAfter, type Workspace } from './terminals/workspace-store';
 import { THEMES, normalizeTheme, setActiveTheme, activeTerminalPalette } from './terminals/theme-store';
 import { sweepStaleSessions } from './terminals/session-purge';
+import { RemoteTap } from './terminals/remote-tap';
+import { debounceFloor, type FloorState } from './terminals/floor-state';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -32,7 +34,15 @@ declare global {
 			addFolder(): Promise<string | null>;
 			pushFloorState(s: unknown): void;
 			onRemoteAction(cb: (a: { type: string; id?: number | string; repo?: string; base?: string | null; task?: string; text?: string; name?: string }) => void): void;
-			remoteInfo(): Promise<{ token: string; port: number; urls: string[]; httpsUrl: string | null }>;
+			remoteInfo(): Promise<{ token: string; port: number; urls: string[]; httpsUrl: string | null; browserUrls: string[] }>;
+			onRemoteInvoke(cb: (m: { id: string; channel: string; payload: unknown }) => void): void;
+			remoteReply(r: { id: string; ok: boolean; value?: unknown; error?: string }): void;
+			remoteEvent(channel: string, payload: unknown): void;
+			onRemoteClients(cb: (n: number) => void): void;
+			remotePasswordSet(pw: string): Promise<{ devicesSignedOut: number }>;
+			remoteDevices(): Promise<Array<{ id: string; label: string; createdAt: number; lastSeen: number }>>;
+			remoteDeviceRevoke(id: string): Promise<boolean>;
+			remoteHasPassword(): Promise<boolean>;
 			onShellDigit(cb: (n: number) => void): void;
 		};
 	}
@@ -88,6 +98,7 @@ async function main(): Promise<void> {
 			// Re-tint every live terminal well in every workspace (new ones self-apply).
 			const palette = activeTerminalPalette();
 			for (const g of grids.values()) g.applyTerminalPalette(palette);
+			floorPublisher.request();
 			persist();
 		});
 
@@ -109,6 +120,11 @@ async function main(): Promise<void> {
 		let workspaces: Workspace[] = normalizeWorkspaces(cfg.workspaces);
 		let activeId = workspaces.some((w) => w.id === cfg.activeWorkspace) ? (cfg.activeWorkspace as string) : workspaces[0]!.id;
 		const grids = new Map<string, TerminalsGrid>();
+
+		// Browser mirror (spec 2026-09-07): one tap for every workspace; keys are `${wsId}:${tileId}`.
+		const tap = new RemoteTap({ emit: (channel, payload) => window.wcc.remoteEvent(channel, payload) });
+		window.wcc.onRemoteClients((n) => tap.setClientCount(n));
+		const tapKey = (ws: string, id: number | 'kane'): string => `${ws}:${id}`;
 
 		// Session-env provider (see docs/superpowers/specs/2026-07-13-session-env-provider-design.md).
 		// Overlay-replaceable; consulted lazily at each spawn through safeSessionEnv at the call sites.
@@ -142,6 +158,10 @@ async function main(): Promise<void> {
 		const siCfg = parseGodSelfImprove(cfg.god);
 		const godSelfImprove = siCfg ? { sourceRepo: siCfg.sourceRepo, toolsDir: siCfg.toolsDir ?? path.join(os.homedir(), 'kane-tools') } : undefined;
 
+		// Assigned once buildFloor() below can be built (it needs usageWidget + switchTo); the
+		// no-op stand-in keeps every grid hook safe during construction.
+		let floorPublisher: { request(): void; flush(): void } = { request() { /* not ready */ }, flush() { /* not ready */ } };
+
 		const depsFor = (id: string): GridDeps => ({
 			repos,
 			group: id,
@@ -156,6 +176,10 @@ async function main(): Promise<void> {
 			sessionEnv: () => sessionEnvProvider({ workspaceId: id }),
 			toast,
 			promptForTopic,
+			onTileOutput: (tid, chunk) => tap.push(tapKey(id, tid), chunk),
+			onTileRestart: (tid) => tap.restart(tapKey(id, tid)),
+			onTileGone: (tid) => tap.detach(tapKey(id, tid)),
+			onFloorChange: () => floorPublisher.request(),
 		});
 		const gridFor = (id: string): TerminalsGrid => {
 			let g = grids.get(id);
@@ -212,7 +236,18 @@ async function main(): Promise<void> {
 			bar.refresh();
 			persist();
 			for (const cb of wsSwitchCbs) { try { cb(id); } catch { /* overlay callback must not break switching */ } }
+			floorPublisher.request();
 		}
+
+		const buildFloor = (): FloorState => ({
+			workspaceId: activeId,
+			...activeGrid.fullFloorState(),
+			workspaces: workspaces.map((w) => ({ id: w.id, name: w.name, active: w.id === activeId })),
+			repos: activeGrid.repoNames(),
+			theme: themeId,
+			usage: usageWidget?.lastReadout() ?? null,
+		});
+		floorPublisher = debounceFloor((st) => window.wcc.remoteEvent('floor:state', st), buildFloor);
 
 		// Terminal-surface visibility, controlled by the overlay (PrivateApi.hideTerminal /
 		// showTerminal). Hiding rides the workspace-switch machinery: the grid unmounts, so
@@ -299,11 +334,16 @@ async function main(): Promise<void> {
 
 		// Phone floor view: push the active workspace's floor to the main-process server every 2s,
 		// and run actions the phone sends back (toggle remote-control / spawn).
-		window.setInterval(() => window.wcc.pushFloorState({
-			...activeGrid.floorState(),
-			workspaces: workspaces.map((w) => ({ id: w.id, name: w.name, active: w.id === activeId })),
-			repos: activeGrid.repoNames(),
-		}), 2000);
+		window.setInterval(() => {
+			window.wcc.pushFloorState({
+				...activeGrid.floorState(),
+				workspaces: workspaces.map((w) => ({ id: w.id, name: w.name, active: w.id === activeId })),
+				repos: activeGrid.repoNames(),
+			});
+			// State-only changes (prompt/menu detection) fire no grid hook — flush so the browser
+			// still sees them within 2s.
+			floorPublisher.flush();
+		}, 2000);
 		window.wcc.onRemoteAction((a) => {
 			if (a.type === 'remote' && typeof a.id === 'number') activeGrid.toggleRemoteById(a.id);
 			else if (a.type === 'spawn' && a.repo && a.task) void activeGrid.spawnFromName(a.repo, a.base ?? null, a.task);
@@ -311,6 +351,32 @@ async function main(): Promise<void> {
 			// The phone mirrors the desk, so these move what is on screen here.
 			else if (a.type === 'center' && typeof a.id === 'number') activeGrid.centerById(a.id);
 			else if (a.type === 'workspace' && typeof a.id === 'string') void switchTo(a.id);
+		});
+
+		// Browser mirror: answer forwarded invokes (validated in main — see electron/remote/handlers.ts).
+		window.wcc.onRemoteInvoke(({ id, channel, payload }) => {
+			const p = payload as any;
+			void (async (): Promise<unknown> => {
+				switch (channel) {
+					case 'floor:state': return buildFloor();
+					case 'tile:snapshot': return tap.snapshot(tapKey(activeId, p.id));
+					case 'kane:snapshot': return tap.snapshot(tapKey(activeId, 'kane'));
+					case 'tile:write': return activeGrid.writeToId(p.id, p.data);
+					case 'kane:write': return activeGrid.kaneWrite(p.data);
+					case 'tile:center': activeGrid.centerById(p.id); return true;
+					case 'tile:hide': return activeGrid.hideById(p.id);
+					case 'tile:show': return activeGrid.showById(p.id);
+					case 'tile:kill': return activeGrid.closeById(p.id);
+					case 'tile:rename': return activeGrid.renameById(p.id, p.name);
+					case 'tile:spawn': return (await activeGrid.spawnFromName(p.repo, p.base, p.task, p.model ?? undefined, p.effort ?? undefined, p.name ?? undefined)) !== null;
+					case 'workspace:switch': await switchTo(p.id); return true;
+					case 'board:get': return activeGrid.boardSummary();
+					default: throw new Error('unknown channel');
+				}
+			})().then(
+				(value) => window.wcc.remoteReply({ id, ok: true, value }),
+				(err) => window.wcc.remoteReply({ id, ok: false, error: String((err as Error)?.message ?? err) }),
+			);
 		});
 
 		// 📱 Phone button → panel with the Tailscale URLs to open on your phone.

@@ -1,5 +1,6 @@
 import { UsageProbe } from '../terminals/usage-probe';
 import type { UsageReadout } from '../terminals/usage-parse';
+import type { FloorUsage } from '../terminals/floor-state';
 
 const AUTO_MS = 60_000; // auto-refresh cadence when enabled
 
@@ -21,6 +22,9 @@ export class UsageWidget {
 	private onDocClick: ((e: MouseEvent) => void) | null = null;
 
 	constructor(private probe: UsageProbe) {}
+
+	/** Browser mirror: the last readout, trimmed to the fields the floor state carries. */
+	lastReadout(): FloorUsage | null { const r = this.last; return r ? { sessionPct: r.sessionPct, sessionReset: r.sessionReset, weekPct: r.weekPct, weekReset: r.weekReset, fablePct: r.fablePct } : null; }
 
 	render(parent: HTMLElement): void {
 		const el = parent.createDiv({ cls: 'wcc-usage' });
