@@ -9,6 +9,8 @@ html, body { height: 100%; margin: 0; background: var(--background-primary); col
 .web-tile[data-state="prompt"] .web-tile-state, .web-tile[data-state="menu"] .web-tile-state { color: #e0a92e; }
 .web-tile[data-state="errored"] .web-tile-state { color: #d21e12; }
 .web-tile[data-state="idle"] .web-tile-state { color: #2fae6e; }
+.web-tile .cos-term-name { cursor: pointer; }
+.web-tile .cos-term-head-btns button { padding: 2px 7px; font-size: 12px; }
 .web-task { flex: 1 1 240px; background: var(--background-primary); color: var(--text-normal); border: 1px solid var(--background-modifier-border); border-radius: 6px; padding: 4px 8px; }
 .web-kane { flex: 0 0 380px; }
 .web-board { max-height: 30vh; overflow: auto; background: var(--background-secondary); border: 1px solid var(--background-modifier-border); border-radius: 8px; padding: 8px 12px; margin-bottom: 10px; font-size: 12px; }

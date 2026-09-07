@@ -56,6 +56,9 @@ export function mountFloor(root: HTMLElement, bridge: Bridge): () => void {
 		write: (data: string) => { void bridge.invoke(id === 'kane' ? 'kane:write' : 'tile:write', id === 'kane' ? { data } : { id, data }).catch(() => {}); },
 		onData: (cb: (chunk: string) => void) => bridge.on('tile:data', (p) => { const m = p as { key: string; chunk: string }; if (m.key === key(id)) cb(m.chunk); }),
 		onClick: () => { if (id !== 'kane') void bridge.invoke('tile:center', { id }); },
+		onRename: (name: string) => { if (id !== 'kane') void bridge.invoke('tile:rename', { id, name }); },
+		onHide: () => { if (id !== 'kane') void bridge.invoke('tile:hide', { id }); },
+		onKill: () => { if (id !== 'kane') void bridge.invoke('tile:kill', { id }); },
 	});
 
 	async function refreshBoard(): Promise<void> {
@@ -78,7 +81,7 @@ export function mountFloor(root: HTMLElement, bridge: Bridge): () => void {
 		kaneBtn.toggleClass('cos-god-on', kaneOpen);
 		if (kaneOpen && !kane && state?.kane) {
 			kane = new WebTile(tileDeps('kane'));
-			kane.render(dock, { name: state.kane.name, repo: 'overseer', branch: '' });
+			kane.render(dock, { name: state.kane.name, repo: 'overseer', branch: '', isKane: true });
 			kane.setSize(state.kane.cols, state.kane.rows);
 			kane.setPalette(activeTerminalPalette());
 			void kane.attach();
@@ -103,6 +106,7 @@ export function mountFloor(root: HTMLElement, bridge: Bridge): () => void {
 
 	function applyState(next: FloorState): void {
 		const prevWs = state?.workspaceId;
+		const prevCenteredId = state?.centeredId ?? null;
 		state = next;
 		if (prevWs !== undefined && prevWs !== next.workspaceId) { for (const t of tiles.values()) t.dispose(); tiles.clear(); kane?.dispose(); kane = null; }
 		// theme
@@ -114,7 +118,13 @@ export function mountFloor(root: HTMLElement, bridge: Bridge): () => void {
 		// repos
 		const cur = repoSel.value; repoSel.empty(); for (const r of next.repos) repoSel.createEl('option', { text: r, value: r }); if (next.repos.includes(cur)) repoSel.value = cur;
 		// usage
-		usage.setText(next.usage && next.usage.sessionPct !== null ? `session ${next.usage.sessionPct}% · week ${next.usage.weekPct ?? '?'}%` : '');
+		if (next.usage && next.usage.sessionPct !== null) {
+			let t = `session ${next.usage.sessionPct}% · week ${next.usage.weekPct ?? '?'}%`;
+			if (next.usage.fablePct !== null) t += ` · fable ${next.usage.fablePct}%`;
+			usage.setText(t);
+		} else {
+			usage.setText('');
+		}
 		status.setText(`${next.terminals.length} sessions`);
 		// tiles
 		const wanted = next.terminals.filter((t) => !t.hidden).map((t) => t.id);
@@ -132,7 +142,11 @@ export function mountFloor(root: HTMLElement, bridge: Bridge): () => void {
 		if (next.kane && kane) kane.setSize(next.kane.cols, next.kane.rows);
 		kaneBtn.disabled = !next.kane;
 		layout();
-		const c = state.centeredId; if (c !== null) tiles.get(c)?.focus();
+		if (next.centeredId !== prevCenteredId && next.centeredId !== null) {
+			const ae = document.activeElement;
+			const typing = ae instanceof HTMLInputElement || ae instanceof HTMLSelectElement || (ae instanceof HTMLTextAreaElement && !ae.classList.contains('xterm-helper-textarea'));
+			if (!typing) tiles.get(next.centeredId)?.focus();
+		}
 	}
 
 	// --- wiring ---
@@ -151,12 +165,12 @@ export function mountFloor(root: HTMLElement, bridge: Bridge): () => void {
 		if (e.key === 'Alt') { altDown = true; layout(); return; }
 		if (!e.altKey || !state) return;
 		const visible = state.terminals.filter((t) => !t.hidden).map((t) => t.id);
-		if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') { e.preventDefault(); const want = nextSpotlight(visible, state.centeredId, e.key === 'ArrowRight' ? 1 : -1); if (want !== null) void bridge.invoke('tile:center', { id: want }); return; }
-		if (e.key === 'ArrowUp' || e.key === 'ArrowDown') { e.preventDefault(); const ws = state.workspaces; if (ws.length < 2) return; const i = Math.max(0, ws.findIndex((w) => w.active)); const n = ws[(i + (e.key === 'ArrowDown' ? 1 : -1) + ws.length) % ws.length]!; void bridge.invoke('workspace:switch', { id: n.id }); return; }
-		if (e.key === 'k' || e.key === 'K') { e.preventDefault(); if (!kaneOpen) toggleKane(); else kane?.focus(); return; }
+		if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') { e.preventDefault(); e.stopPropagation(); const want = nextSpotlight(visible, state.centeredId, e.key === 'ArrowRight' ? 1 : -1); if (want !== null) void bridge.invoke('tile:center', { id: want }); return; }
+		if (e.key === 'ArrowUp' || e.key === 'ArrowDown') { e.preventDefault(); e.stopPropagation(); const ws = state.workspaces; if (ws.length < 2) return; const i = Math.max(0, ws.findIndex((w) => w.active)); const n = ws[(i + (e.key === 'ArrowDown' ? 1 : -1) + ws.length) % ws.length]!; void bridge.invoke('workspace:switch', { id: n.id }); return; }
+		if (e.key === 'k' || e.key === 'K') { if (!state.kane) return; e.preventDefault(); e.stopPropagation(); if (!kaneOpen) toggleKane(); else kane?.focus(); return; }
 		const norm = e.key.length === 1 ? e.key.toUpperCase() : e.key;
 		const idx = keyToIndex(norm);
-		if (idx !== null && visible[idx] !== undefined) { e.preventDefault(); void bridge.invoke('tile:center', { id: visible[idx] }); }
+		if (idx !== null && visible[idx] !== undefined) { e.preventDefault(); e.stopPropagation(); void bridge.invoke('tile:center', { id: visible[idx] }); }
 	};
 	const onKeyUp = (e: KeyboardEvent): void => { if (e.key === 'Alt') { altDown = false; for (const t of tiles.values()) t.setBadge(null); } };
 	document.addEventListener('keydown', onKeyDown, true);
