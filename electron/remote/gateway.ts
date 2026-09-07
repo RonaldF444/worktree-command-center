@@ -1,9 +1,11 @@
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from 'http';
 import { readFile, stat } from 'fs/promises';
 import { resolve as resolvePath, relative, isAbsolute, extname, join } from 'path';
+import { isIP } from 'net';
 import { WebSocketServer, WebSocket } from 'ws';
 import { parseClientFrame, type ServerFrame, MAX_FRAME_BYTES, DEVICE_REVOKED_ERROR, DEVICE_REVOKED_CLOSE_CODE, SLOW_CONSUMER_CLOSE_CODE, WS_PATH } from './protocol';
 import type { AuthFrame, AuthResult } from './auth';
+import { isTailscaleIp } from '../remote-net';
 
 export type Handler = (payload: unknown) => Promise<unknown>;
 export type HandlerTable = Record<string, Handler>;
@@ -18,6 +20,7 @@ export interface GatewayOpts {
 	backpressureLimitBytes?: number;
 	heartbeatSweepMs?: number;
 	heartbeatTimeoutMs?: number;
+	allowHost?: (hostname: string) => boolean;
 }
 export interface GatewayHandle {
 	boundHosts(): string[];
@@ -34,9 +37,12 @@ const BACKPRESSURE_LIMIT_BYTES = 4 * 1024 * 1024;
 const HEARTBEAT_SWEEP_MS = 15_000;
 const HEARTBEAT_TIMEOUT_MS = 60_000;
 const MAX_UNAUTHENTICATED_FRAMES = 120;
+const MAX_UNAUTHED_FRAME_BYTES = 4096;
 const MAX_AUTH_ATTEMPTS_PER_SOCKET = 10;
 const MAX_AUTH_ATTEMPTS_PER_IP = 12;
 const AUTH_ATTEMPT_WINDOW_MS = 15 * 60 * 1000;
+const MAX_SOCKETS = 64;
+const SLOW_CONSUMER_LINGER_MS = 5000;
 
 const MIME: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.map': 'application/json', '.json': 'application/json', '.png': 'image/png', '.ico': 'image/x-icon', '.svg': 'image/svg+xml', '.woff2': 'font/woff2' };
 
@@ -51,6 +57,18 @@ interface ClientState { authed: boolean; deviceId?: string; lastSeen: number; au
 
 function routePathname(url: string | undefined): string {
 	try { return new URL(url ?? '/', 'http://localhost').pathname; } catch { return ''; }
+}
+
+/** Strips `:port` off a Host header, handling a bracketed IPv6 literal (`[::1]:port`). Lowercased. */
+function hostnameOf(hostHeader: string | undefined): string {
+	if (!hostHeader) return '';
+	const h = hostHeader.trim();
+	if (h.startsWith('[')) {
+		const end = h.indexOf(']');
+		return (end === -1 ? h.slice(1) : h.slice(1, end)).toLowerCase();
+	}
+	const idx = h.lastIndexOf(':');
+	return (idx === -1 ? h : h.slice(0, idx)).toLowerCase();
 }
 
 async function serveStatic(staticDir: string, req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -83,6 +101,9 @@ export async function startGateway(opts: GatewayOpts): Promise<GatewayHandle> {
 	const authAttemptsByIp = new Map<string, { count: number; windowStart: number }>();
 	const countListeners = new Set<(n: number) => void>();
 	let lastCount = 0;
+	let closed = false;
+	const servers = new Map<string, Server>();
+	let port = opts.port;
 	const notifyCount = (): void => {
 		const n = [...sockets.values()].filter((s) => s.authed).length;
 		if (n === lastCount) return;
@@ -90,10 +111,17 @@ export async function startGateway(opts: GatewayOpts): Promise<GatewayHandle> {
 		for (const cb of countListeners) { try { cb(n); } catch (err) { console.error('[remote] client-count listener threw:', err); } }
 	};
 	const sendFrame = (ws: WebSocket, f: ServerFrame): void => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(f)); };
+	// Blocks DNS rebinding: a request/upgrade must target a Host we actually bound (or `localhost`,
+	// or one the caller explicitly trusts via allowHost — e.g. a Tailscale MagicDNS name).
+	const hostAllowed = (hostHeader: string | undefined): boolean => {
+		const hostname = hostnameOf(hostHeader);
+		return servers.has(hostname) || hostname === 'localhost' || (opts.allowHost?.(hostname) ?? false);
+	};
 
 	function dispatch(raw: string, ip: string, ws: WebSocket, state: ClientState): void {
 		if (state.blocked) return;
 		state.lastSeen = Date.now();
+		if (!state.authed && raw.length > MAX_UNAUTHED_FRAME_BYTES) { state.blocked = true; ws.close(1008, 'frame too large'); return; }
 		if (!state.authed && ++state.unauthedFrames > MAX_UNAUTHENTICATED_FRAMES) { state.blocked = true; ws.close(1008, 'too many frames'); return; }
 		const frame = parseClientFrame(raw);
 		if (!frame) return;
@@ -135,6 +163,7 @@ export async function startGateway(opts: GatewayOpts): Promise<GatewayHandle> {
 		noServer: true,
 		maxPayload: MAX_FRAME_BYTES,
 		verifyClient: (info, cb) => {
+			if (!hostAllowed(info.req.headers.host)) { cb(false, 421, 'Misdirected'); return; }
 			const origin = info.origin;
 			if (!origin) { cb(true); return; }
 			try { if (new URL(origin).host === info.req.headers.host) { cb(true); return; } } catch { /* malformed */ }
@@ -142,6 +171,7 @@ export async function startGateway(opts: GatewayOpts): Promise<GatewayHandle> {
 		},
 	});
 	wss.on('connection', (ws, req) => {
+		if (sockets.size >= MAX_SOCKETS) { ws.close(1013, 'too many connections'); return; }
 		const state: ClientState = { authed: false, lastSeen: Date.now(), authAttempts: 0, unauthedFrames: 0, blocked: false };
 		sockets.set(ws, state);
 		const ip = req.socket.remoteAddress ?? 'unknown';
@@ -152,6 +182,11 @@ export async function startGateway(opts: GatewayOpts): Promise<GatewayHandle> {
 	});
 
 	const requestHandler = (req: IncomingMessage, res: ServerResponse): void => {
+		if (!hostAllowed(req.headers.host)) {
+			res.writeHead(421, { 'Content-Type': 'text/plain', ...APP_SHELL_SECURITY_HEADERS });
+			res.end('Misdirected Request');
+			return;
+		}
 		const pathname = routePathname(req.url);
 		if (opts.phoneRoutes?.(req, res, pathname)) return;
 		void serveStatic(opts.staticDir, req, res);
@@ -161,10 +196,12 @@ export async function startGateway(opts: GatewayOpts): Promise<GatewayHandle> {
 		else socket.destroy();
 	};
 
-	const servers = new Map<string, Server>();
-	let port = opts.port;
 	async function listenOn(host: string): Promise<boolean> {
-		if (servers.has(host) || host === '0.0.0.0' || host === '::') return false;
+		if (closed || servers.has(host)) return false;
+		if (!(isIP(host) === 4 && (host.startsWith('127.') || isTailscaleIp(host)))) {
+			console.error(`[remote] refused to bind ${host}: not loopback or Tailscale`);
+			return false;
+		}
 		const srv = createServer(requestHandler);
 		srv.on('upgrade', upgradeHandler);
 		try {
@@ -196,7 +233,13 @@ export async function startGateway(opts: GatewayOpts): Promise<GatewayHandle> {
 			try { json = JSON.stringify({ t: 'event', channel, payload } satisfies ServerFrame); } catch (err) { console.error('[remote] cannot serialize event', channel, err); return; }
 			for (const [ws, s] of sockets) {
 				if (!s.authed || ws.readyState !== WebSocket.OPEN) continue;
-				if (ws.bufferedAmount > backpressure) { ws.close(SLOW_CONSUMER_CLOSE_CODE, 'slow-consumer'); continue; }
+				if (ws.bufferedAmount > backpressure) {
+					ws.close(SLOW_CONSUMER_CLOSE_CODE, 'slow-consumer');
+					// A peer that never acks the close (e.g. still not draining) would otherwise pin
+					// this socket open indefinitely; force it after a grace period.
+					setTimeout(() => ws.terminate(), SLOW_CONSUMER_LINGER_MS).unref();
+					continue;
+				}
 				ws.send(json);
 			}
 		},
@@ -215,10 +258,12 @@ export async function startGateway(opts: GatewayOpts): Promise<GatewayHandle> {
 		clientCount: () => lastCount,
 		onClientCount(cb) { countListeners.add(cb); return () => { countListeners.delete(cb); }; },
 		async close() {
+			if (closed) return;
+			closed = true;
 			clearInterval(sweep);
 			for (const ws of sockets.keys()) ws.terminate();
 			wss.close();
-			await Promise.all([...servers.values()].map((s) => new Promise<void>((r) => s.close(() => r()))));
+			await Promise.all([...servers.values()].map((s) => { s.closeAllConnections(); return new Promise<void>((r) => s.close(() => r())); }));
 			servers.clear();
 		},
 	};

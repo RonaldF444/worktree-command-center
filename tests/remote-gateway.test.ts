@@ -2,9 +2,24 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import * as http from 'http';
 import WebSocket from 'ws';
 import { startGateway, type GatewayHandle } from '../electron/remote/gateway';
 import type { AuthFrame, AuthResult } from '../electron/remote/auth';
+
+// `fetch()` treats `Host` as a forbidden header and silently drops it, so a couple of the
+// Host-header-guard tests below need a raw request where we control every header sent.
+function getWithHost(base: string, path: string, host: string): Promise<number> {
+	return new Promise((resolve, reject) => {
+		const u = new URL(path, base);
+		const req = http.request({ hostname: u.hostname, port: u.port, path: u.pathname, headers: { Host: host } }, (res) => {
+			res.resume();
+			resolve(res.statusCode ?? 0);
+		});
+		req.once('error', reject);
+		req.end();
+	});
+}
 
 let dir: string; let gw: GatewayHandle | null = null;
 const okAuth = async (f: AuthFrame): Promise<AuthResult> =>
@@ -157,4 +172,52 @@ describe('hosts', () => {
 		expect(await gw!.addHost('0.0.0.0')).toBe(false); // refused: never all-interfaces
 		expect((await fetch(`${base}/`)).status).toBe(200);
 	});
+	it('binds only loopback/Tailscale hosts — an allowlist, not a denylist', async () => {
+		await start();
+		expect(await gw!.addHost('')).toBe(false);
+		expect(await gw!.addHost('::0')).toBe(false);
+		expect(await gw!.addHost('0.0.0.0')).toBe(false);
+		expect(await gw!.addHost('192.168.1.5')).toBe(false);
+		expect(await gw!.addHost('127.0.0.2')).toBe(true);
+		expect(gw!.boundHosts().sort()).toEqual(['127.0.0.1', '127.0.0.2']);
+	});
+	it('refuses addHost after close', async () => {
+		await start();
+		await gw!.close();
+		expect(await gw!.addHost('127.0.0.1')).toBe(false);
+	});
+});
+
+describe('Host header guard (DNS rebinding)', () => {
+	it('rejects an HTTP request whose Host header does not name a bound host', async () => {
+		const { base } = await start();
+		expect(await getWithHost(base, '/', 'evil.example')).toBe(421);
+	});
+	it('rejects a websocket upgrade whose Host header does not name a bound host', async () => {
+		const { wsUrl } = await start();
+		await expect(open(wsUrl, { Host: 'evil.example' })).rejects.toThrow();
+	});
+	it('allows a Host accepted by allowHost', async () => {
+		const { base } = await start({ allowHost: (h) => h.endsWith('.ts.net') });
+		expect(await getWithHost(base, '/', 'box.tail.ts.net')).toBe(200);
+	});
+});
+
+describe('pre-auth resource bounds', () => {
+	it('closes an unauthed socket that sends an oversized frame', async () => {
+		const { wsUrl } = await start();
+		const s = await open(wsUrl);
+		const done = closed(s);
+		s.send(JSON.stringify({ t: 'auth', password: 'x'.repeat(5000) }));
+		expect(await done).toBe(1008);
+	});
+	it('closes an unauthed socket after 120 frames', async () => {
+		const { wsUrl } = await start();
+		const s = await open(wsUrl);
+		const done = closed(s);
+		for (let i = 0; i < 121; i++) s.send(JSON.stringify({ t: 'ping' }));
+		expect(await done).toBe(1008);
+	});
+	// MAX_SOCKETS (64) is covered by inspection only: opening 65 real sockets per test run is slow
+	// and would slow the whole suite down for a one-line bound check.
 });
