@@ -15,8 +15,19 @@ import { Worker } from 'worker_threads';
 const REMOTE_PORT = 7420;
 let win: BrowserWindow | null = null;
 let gateway: GatewayHandle | null = null;
+let gatewayUp = false;
 let floorState: unknown = { workspaces: [], centeredId: null, kane: null, terminals: [], repos: [] };
 const phoneToken = randomBytes(8).toString('hex');
+
+// The gateway can resolve/reject before the renderer has finished loading (and thus before it
+// has wired up its 'remote:notice' listener), so notices are queued until 'did-finish-load'
+// fires (registered in createWindow) and flushed from there; after that notify() sends directly.
+let windowReady = false;
+let pendingNotices: string[] = [];
+const notify = (message: string): void => {
+	if (windowReady) { win?.webContents.send('remote:notice', message); return; }
+	pendingNotices.push(message);
+};
 
 // Chromium's native window-occlusion detection misfires on this machine's display topology
 // (virtual display adapters), throttling the renderer to ~1Hz while it looks "occluded" —
@@ -61,6 +72,13 @@ function createWindow(): void {
 	});
 
 	win.loadFile(path.join(__dirname, '..', 'index.html'));
+
+	win.webContents.on('did-finish-load', () => {
+		windowReady = true;
+		const notices = pendingNotices;
+		pendingNotices = [];
+		for (const m of notices) win?.webContents.send('remote:notice', m);
+	});
 
 	// F11 toggles native fullscreen. before-input-event fires ahead of the page AND
 	// (via preventDefault) suppresses the default menu's own F11 accelerator, so the
@@ -129,12 +147,17 @@ function createWindow(): void {
 		allowHost: (h) => h.endsWith('.ts.net'),
 	}).then((gw) => {
 		gateway = gw;
+		gatewayUp = true;
+		if (gw.boundHosts().length === 1) notify('Remote: Tailscale IP not found — browser access is local-only until Tailscale is up');
 		gw.onClientCount((n) => win?.webContents.send('remote:clients', n));
 		writeRemoteInfo(remoteInfoPath(), { url: `http://127.0.0.1:${gw.boundPort()}/phone`, token: phoneToken });
 		// Tailscale often finishes starting after we do: re-check once a minute and bind late.
 		const rebind = setInterval(() => { for (const ip of tsIps()) if (!gw.boundHosts().includes(ip)) void gw.addHost(ip); }, 60_000);
 		rebind.unref();
-	}).catch((err) => console.error('[remote] gateway failed to start:', err));
+	}).catch((err) => {
+		console.error('[remote] gateway failed to start:', err);
+		notify('Remote server failed to start (is port 7420 in use?) — browser and phone access are off');
+	});
 
 	ipcMain.handle('remote:info', async () => {
 		const hosts = gateway?.boundHosts() ?? ['127.0.0.1'];
@@ -145,6 +168,7 @@ function createWindow(): void {
 			httpsUrl: httpsUrlFor(await tailscaleVoiceDnsName(REMOTE_PORT), phoneToken),
 			browserUrls: browserUrls(hosts.filter((h) => h !== '127.0.0.1'), REMOTE_PORT),
 			tailscaleUp: hosts.length > 1,
+			gatewayUp,
 		};
 	});
 	ipcMain.handle('remote:password:set', (_e, pw: unknown) => auth.setPassword(String(pw ?? '')));

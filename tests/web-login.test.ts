@@ -7,6 +7,8 @@ describe('describeAuthFailure', () => {
 		expect(describeAuthFailure('too many attempts -- try again later')).toBe('Too many attempts. Wait 15 minutes and try again.');
 		expect(describeAuthFailure('no password set')).toBe('No password is set yet. Set one in the desktop app (📱 panel).');
 		expect(describeAuthFailure('device revoked')).toBe('This device was signed out from the desktop.');
+		expect(describeAuthFailure('device token expired')).toBe('Your saved login expired. Enter the password again.');
+		expect(describeAuthFailure('unknown device token')).toBe('This device is no longer signed in. Enter the password again.');
 		expect(describeAuthFailure('not connected')).toBe('Not connected to the desktop. Retrying…');
 		expect(describeAuthFailure('C:\\secret\\path')).toBe('Login failed.');
 		expect(describeAuthFailure(undefined)).toBe('Login failed.');

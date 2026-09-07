@@ -53,6 +53,16 @@ export const APP_SHELL_SECURITY_HEADERS: Readonly<Record<string, string>> = {
 	'Referrer-Policy': 'no-referrer',
 };
 
+// The phone page (and any other opts.phoneRoutes-served route) has an inline script, so it
+// must NOT get the app-shell CSP above — that has no 'unsafe-inline' for script-src and would
+// silently break it. Still lock the rest down: no framing, no MIME sniffing, no referrer leak.
+export const PHONE_SECURITY_HEADERS: Readonly<Record<string, string>> = {
+	'Content-Security-Policy': "frame-ancestors 'none'",
+	'X-Content-Type-Options': 'nosniff',
+	'X-Frame-Options': 'DENY',
+	'Referrer-Policy': 'no-referrer',
+};
+
 interface ClientState { authed: boolean; deviceId?: string; lastSeen: number; authAttempts: number; unauthedFrames: number; blocked: boolean; }
 
 function routePathname(url: string | undefined): string {
@@ -188,6 +198,7 @@ export async function startGateway(opts: GatewayOpts): Promise<GatewayHandle> {
 			return;
 		}
 		const pathname = routePathname(req.url);
+		for (const [k, v] of Object.entries(PHONE_SECURITY_HEADERS)) res.setHeader(k, v);
 		if (opts.phoneRoutes?.(req, res, pathname)) return;
 		void serveStatic(opts.staticDir, req, res);
 	};

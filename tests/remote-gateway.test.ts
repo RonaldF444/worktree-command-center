@@ -68,6 +68,15 @@ describe('static + routes', () => {
 		const { base } = await start({ phoneRoutes: (_req, res, pathname) => { if (pathname === '/phone') { res.writeHead(200); res.end('phone'); return true; } return false; } });
 		expect(await (await fetch(`${base}/phone`)).text()).toBe('phone');
 	});
+	it('sets phone security headers (not the app-shell CSP) on /phone, and keeps the full app-shell CSP on /', async () => {
+		const { base } = await start({ phoneRoutes: (_req, res, pathname) => { if (pathname === '/phone') { res.writeHead(200); res.end('phone'); return true; } return false; } });
+		const phone = await fetch(`${base}/phone`);
+		expect(phone.headers.get('x-frame-options')).toBe('DENY');
+		expect(phone.headers.get('x-content-type-options')).toBe('nosniff');
+		expect(phone.headers.get('content-security-policy')).toBe("frame-ancestors 'none'");
+		const root = await fetch(`${base}/`);
+		expect(root.headers.get('content-security-policy')).toContain("default-src 'self'");
+	});
 });
 
 describe('websocket auth + dispatch', () => {

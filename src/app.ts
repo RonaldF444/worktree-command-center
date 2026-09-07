@@ -34,7 +34,8 @@ declare global {
 			addFolder(): Promise<string | null>;
 			pushFloorState(s: unknown): void;
 			onRemoteAction(cb: (a: { type: string; id?: number | string; repo?: string; base?: string | null; task?: string; text?: string; name?: string }) => void): void;
-			remoteInfo(): Promise<{ token: string; port: number; urls: string[]; httpsUrl: string | null; browserUrls: string[]; tailscaleUp: boolean }>;
+			onRemoteNotice(cb: (m: string) => void): void;
+			remoteInfo(): Promise<{ token: string; port: number; urls: string[]; httpsUrl: string | null; browserUrls: string[]; tailscaleUp: boolean; gatewayUp: boolean }>;
 			onRemoteInvoke(cb: (m: { id: string; channel: string; payload: unknown }) => void): void;
 			remoteReply(r: { id: string; ok: boolean; value?: unknown; error?: string }): void;
 			remoteEvent(channel: string, payload: unknown): void;
@@ -55,6 +56,7 @@ async function main(): Promise<void> {
 		installDomShim();
 
 		const { sidecarDir, userData } = await window.wcc.paths();
+		window.wcc.onRemoteNotice((m) => toast(m));
 		const cfg = await window.wcc.getConfig();
 
 		// Renderer-aging telemetry (perf-log.jsonl in userData) — long-lived instances degrade;
@@ -442,8 +444,12 @@ async function main(): Promise<void> {
 					voiceBox.createDiv({ cls: 'wcc-phone-sub', text: 'For voice, run once:  tailscale serve --bg 7420' });
 				}
 				urlsBox.empty();
-				for (const u of info.urls) urlsBox.createEl('div', { cls: 'wcc-phone-url', text: u });
 				browserBox.empty();
+				if (!info.gatewayUp) {
+					browserBox.createDiv({ cls: 'wcc-phone-sub', text: 'Remote server is not running (port 7420 busy?). Restart the app.' });
+					return;
+				}
+				for (const u of info.urls) urlsBox.createEl('div', { cls: 'wcc-phone-url', text: u });
 				if (!info.tailscaleUp) browserBox.createDiv({ cls: 'wcc-phone-sub', text: 'Tailscale IP not found — browser access is local-only right now.' });
 				for (const u of info.browserUrls) browserBox.createEl('div', { cls: 'wcc-phone-url', text: u });
 			}).catch(() => {

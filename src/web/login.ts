@@ -9,6 +9,8 @@ export function describeAuthFailure(error: string | undefined): string {
 		case 'too many attempts -- try again later': return 'Too many attempts. Wait 15 minutes and try again.';
 		case 'no password set': return 'No password is set yet. Set one in the desktop app (📱 panel).';
 		case 'device revoked': return 'This device was signed out from the desktop.';
+		case 'device token expired': return 'Your saved login expired. Enter the password again.';
+		case 'unknown device token': return 'This device is no longer signed in. Enter the password again.';
 		case 'not connected': return 'Not connected to the desktop. Retrying…';
 		default: return 'Login failed.';
 	}

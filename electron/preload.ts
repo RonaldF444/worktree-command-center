@@ -20,6 +20,7 @@ import { ipcRenderer } from 'electron';
 	pushFloorState: (s: unknown) => ipcRenderer.send('remote:state', s),
 	onRemoteAction: (cb: (a: unknown) => void) => ipcRenderer.on('remote:action', (_e, a) => cb(a)),
 	remoteInfo: () => ipcRenderer.invoke('remote:info'),
+	onRemoteNotice: (cb: (m: string) => void) => ipcRenderer.on('remote:notice', (_e, m) => cb(String(m))),
 	onRemoteInvoke: (cb: (m: unknown) => void) => ipcRenderer.on('remote:invoke', (_e, m) => cb(m)),
 	remoteReply: (r: unknown) => ipcRenderer.send('remote:reply', r),
 	remoteEvent: (channel: string, payload: unknown) => ipcRenderer.send('remote:event', { channel, payload }),
