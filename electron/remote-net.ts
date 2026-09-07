@@ -21,17 +21,27 @@ export function pickHosts(ifaces: Record<string, NetworkInterfaceInfo[] | undefi
 	return [...ts, hostname, ...lan];
 }
 
+/** Phone page URLs (the page moved to /phone when the browser app took `/`). */
 export function accessUrls(hosts: string[], port: number, token: string): string[] {
-	return hosts.map((h) => `http://${h}:${port}/?t=${token}`);
+	return hosts.map((h) => `http://${h}:${port}/phone?t=${token}`);
 }
 
-/** The HTTPS URL for the phone page when `tailscale serve` is fronting us, else null.
- *  Voice needs a secure context: Safari will not hand a microphone to an http:// page, so
- *  the plain-HTTP URLs above are read-only in practice. MagicDNS names arrive fully
- *  qualified with a trailing dot, which is legal in DNS but ugly in a URL. */
+/** HTTPS phone URL when `tailscale serve` fronts us, else null. MagicDNS names carry a trailing dot. */
 export function httpsUrlFor(dnsName: string | null | undefined, token: string): string | null {
 	const host = (dnsName ?? '').trim().replace(/\.$/, '');
-	return host ? `https://${host}/?t=${token}` : null;
+	return host ? `https://${host}/phone?t=${token}` : null;
+}
+
+/** Every Tailscale IPv4 on this machine (the gateway binds to exactly these plus loopback). */
+export function tailscaleIps(ifaces: Record<string, NetworkInterfaceInfo[] | undefined>): string[] {
+	const out: string[] = [];
+	for (const list of Object.values(ifaces)) for (const i of list ?? []) if (i.family === 'IPv4' && !i.internal && isTailscaleIp(i.address)) out.push(i.address);
+	return out;
+}
+
+/** Browser-app URLs (no token: the app has its own login). */
+export function browserUrls(hosts: string[], port: number): string[] {
+	return hosts.map((h) => `http://${h}:${port}/`);
 }
 
 /** Does `tailscale serve status --json` show an active handler proxying to `port` on this

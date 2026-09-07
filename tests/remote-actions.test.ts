@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { parseRemoteAction, MAX_INPUT, KANE_ID } from '../electron/remote-actions';
+import { parseTileInvoke, FORWARDED_CHANNELS, MAX_WRITE } from '../electron/remote-actions';
 
 describe('parseRemoteAction — mirror actions (center / workspace)', () => {
 	it('accepts centering a real tile', () => {
@@ -80,5 +81,51 @@ describe('parseRemoteAction', () => {
 		expect(parseRemoteAction({ type: 'input', id: 1 })).toBeNull();
 		expect(parseRemoteAction({ type: 'spawn', repo: '', task: 'x' })).toBeNull();
 		expect(parseRemoteAction({ type: 'remote', id: 'x' })).toBeNull();
+	});
+});
+
+describe('parseTileInvoke', () => {
+	it('accepts the payload-less channels with any payload', () => {
+		expect(parseTileInvoke('floor:state', undefined)).toEqual({ channel: 'floor:state' });
+		expect(parseTileInvoke('board:get', { junk: 1 })).toEqual({ channel: 'board:get' });
+		expect(parseTileInvoke('kane:snapshot', null)).toEqual({ channel: 'kane:snapshot' });
+	});
+	it('validates id channels: non-negative integers only, never Kane', () => {
+		for (const ch of ['tile:snapshot', 'tile:center', 'tile:hide', 'tile:show', 'tile:kill'] as const) {
+			expect(parseTileInvoke(ch, { id: 3 })).toEqual({ channel: ch, id: 3 });
+			expect(parseTileInvoke(ch, { id: -1 })).toBeNull();
+			expect(parseTileInvoke(ch, { id: 1.5 })).toBeNull();
+			expect(parseTileInvoke(ch, { id: '3' })).toBeNull();
+			expect(parseTileInvoke(ch, {})).toBeNull();
+		}
+		expect(parseTileInvoke('tile:center', { id: KANE_ID })).toBeNull();
+	});
+	it('caps tile:write and kane:write data', () => {
+		expect(parseTileInvoke('tile:write', { id: 1, data: 'ls\r' })).toEqual({ channel: 'tile:write', id: 1, data: 'ls\r' });
+		expect(parseTileInvoke('tile:write', { id: 1, data: '' })).toBeNull();
+		expect(parseTileInvoke('tile:write', { id: 1, data: 'x'.repeat(MAX_WRITE + 1) })).toBeNull();
+		expect(parseTileInvoke('kane:write', { data: 'hi\r' })).toEqual({ channel: 'kane:write', data: 'hi\r' });
+		expect(parseTileInvoke('kane:write', { data: 5 })).toBeNull();
+	});
+	it('trims and caps rename', () => {
+		expect(parseTileInvoke('tile:rename', { id: 2, name: '  api  ' })).toEqual({ channel: 'tile:rename', id: 2, name: 'api' });
+		expect(parseTileInvoke('tile:rename', { id: 2, name: '   ' })).toBeNull();
+		expect(parseTileInvoke('tile:rename', { id: 2, name: 'x'.repeat(81) })).toBeNull();
+	});
+	it('spawn requires repo + task; optional fields normalize to null', () => {
+		expect(parseTileInvoke('tile:spawn', { repo: 'r', task: 'do it' })).toEqual({ channel: 'tile:spawn', repo: 'r', base: null, task: 'do it', model: null, effort: null, name: null });
+		expect(parseTileInvoke('tile:spawn', { repo: 'r', task: 'do it', base: 'main', model: 'claude-opus-4-8', effort: 'high', name: 'n' }))
+			.toEqual({ channel: 'tile:spawn', repo: 'r', base: 'main', task: 'do it', model: 'claude-opus-4-8', effort: 'high', name: 'n' });
+		expect(parseTileInvoke('tile:spawn', { repo: '', task: 't' })).toBeNull();
+		expect(parseTileInvoke('tile:spawn', { repo: 'r' })).toBeNull();
+		expect(parseTileInvoke('tile:spawn', { repo: 'r', task: 't', effort: 'silly' })).toBeNull();
+	});
+	it('workspace:switch needs a non-empty string id', () => {
+		expect(parseTileInvoke('workspace:switch', { id: ' ws-2 ' })).toEqual({ channel: 'workspace:switch', id: 'ws-2' });
+		expect(parseTileInvoke('workspace:switch', { id: '' })).toBeNull();
+	});
+	it('rejects unknown channels and lists the forwarded set', () => {
+		expect(parseTileInvoke('config:set', {})).toBeNull();
+		expect([...FORWARDED_CHANNELS].sort()).toEqual(['board:get', 'floor:state', 'kane:snapshot', 'kane:write', 'tile:center', 'tile:hide', 'tile:kill', 'tile:rename', 'tile:show', 'tile:snapshot', 'tile:spawn', 'tile:write', 'workspace:switch']);
 	});
 });
