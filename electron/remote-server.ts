@@ -1,63 +1,42 @@
-import { createServer, type IncomingMessage, type ServerResponse } from 'http';
-import type { AddressInfo } from 'net';
-import { randomBytes } from 'crypto';
-import { ipcMain, type BrowserWindow } from 'electron';
-import { parseRemoteAction } from './remote-actions';
-import { remoteInfoPath, writeRemoteInfo } from './remote-info';
+import type { IncomingMessage, ServerResponse } from 'http';
+import { parseRemoteAction, type RemoteAction } from './remote-actions';
 
-export interface RemoteServerOpts { port: number; getWindow: () => BrowserWindow | null; }
+export interface PhoneRouteDeps { token: string; getFloor: () => unknown; onAction: (action: RemoteAction) => void; }
 
-let floorState: unknown = { workspaces: [], centeredId: null, kane: null, terminals: [], repos: [] };
-
-/** Start the phone-floor HTTP server. Returns the access token. The renderer pushes floor
- *  state via the `remote:state` IPC; phone actions are forwarded to it via `remote:action`. */
-export function startRemoteServer(opts: RemoteServerOpts): { token: string } {
-	const token = randomBytes(8).toString('hex');
-
-	ipcMain.removeAllListeners('remote:state');
-	ipcMain.on('remote:state', (_e, s: unknown) => { floorState = s; });
-
+/** The phone floor view's routes, mounted by the browser gateway (electron/remote/gateway.ts):
+ *  GET /phone (the page, no token — it is a shell), GET /api/floor and POST /api/action (token
+ *  in `?t=`). Returns true when it handled the request. The page's own fetches use absolute
+ *  `/api/...` paths, so serving it at /phone instead of / needs no change to MOBILE_HTML. */
+export function createPhoneRoutes(deps: PhoneRouteDeps): (req: IncomingMessage, res: ServerResponse, pathname: string) => boolean {
 	const authed = (req: IncomingMessage): boolean => {
-		try { return new URL(req.url ?? '/', 'http://x').searchParams.get('t') === token; } catch { return false; }
+		try { return new URL(req.url ?? '/', 'http://x').searchParams.get('t') === deps.token; } catch { return false; }
 	};
 	const json = (res: ServerResponse, code: number, body: unknown): void => {
 		res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(body));
 	};
-
-	const server = createServer((req, res) => {
-		const path = (req.url ?? '/').split('?')[0];
-		if (req.method === 'GET' && path === '/') {
-			res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); res.end(MOBILE_HTML); return;
+	return (req, res, pathname) => {
+		if (req.method === 'GET' && pathname === '/phone') {
+			res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); res.end(MOBILE_HTML); return true;
 		}
-		if (path.startsWith('/api/')) {
-			if (!authed(req)) { json(res, 401, { error: 'bad token' }); return; }
-			if (req.method === 'GET' && path === '/api/floor') { json(res, 200, floorState); return; }
-			if (req.method === 'POST' && path === '/api/action') {
-				let body = '';
-				req.on('data', (c) => { body += c; if (body.length > 1e5) req.destroy(); });
-				req.on('end', () => {
-					try {
-						const action = parseRemoteAction(JSON.parse(body));
-						if (!action) { json(res, 400, { error: 'bad action' }); return; }
-						opts.getWindow()?.webContents.send('remote:action', action);
-						json(res, 200, { ok: true });
-					} catch { json(res, 400, { error: 'bad body' }); }
-				});
-				return;
-			}
-			json(res, 404, { error: 'not found' }); return;
+		if (!pathname.startsWith('/api/')) return false;
+		if (!authed(req)) { json(res, 401, { error: 'bad token' }); return true; }
+		if (req.method === 'GET' && pathname === '/api/floor') { json(res, 200, deps.getFloor()); return true; }
+		if (req.method === 'POST' && pathname === '/api/action') {
+			let body = '';
+			req.on('data', (c) => { body += c; if (body.length > 1e5) req.destroy(); });
+			req.on('end', () => {
+				try {
+					const action = parseRemoteAction(JSON.parse(body));
+					if (!action) { json(res, 400, { error: 'bad action' }); return; }
+					deps.onAction(action);
+					json(res, 200, { ok: true });
+				} catch { json(res, 400, { error: 'bad body' }); }
+			});
+			return true;
 		}
-		res.writeHead(404); res.end('not found');
-	});
-	server.listen(opts.port, '0.0.0.0', () => {
-		console.log(`[remote] phone floor on :${opts.port}`);
-		const addr = server.address();
-		const boundPort = addr && typeof addr === 'object' ? (addr as AddressInfo).port : opts.port;
-		writeRemoteInfo(remoteInfoPath(), { url: `http://127.0.0.1:${boundPort}`, token });
-	});
-	server.on('error', (e) => console.error('[remote] server error:', e));
-
-	return { token };
+		json(res, 404, { error: 'not found' });
+		return true;
+	};
 }
 
 // A CAROUSEL of the floor, sized for a phone held next to the machine — see
@@ -73,7 +52,7 @@ export function startRemoteServer(opts: RemoteServerOpts): { token: string } {
 // `var`/`function` only, and every literal backtick and ${ must stay escaped. NOTHING in this
 // repo executes this page — tsc cannot, and no test does — so trace changes by hand or extract
 // the script and run it under a DOM shim before trusting it.
-const MOBILE_HTML = `<!doctype html><html><head><meta charset="utf-8"/>
+export const MOBILE_HTML = `<!doctype html><html><head><meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover"/>
 <title>Floor</title><style>
 /* Forge & River, distilled: the desktop's warm forge-charcoal and molten gold, monospace for
