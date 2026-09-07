@@ -120,6 +120,23 @@ describe('createAuth', () => {
 		t += 15 * 60 * 1000 + 1;
 		expect((await a.authenticate({ password: PW }, '30.0.0.1')).ok).toBe(true);
 	}, 60_000);
+	it('a correct password clears the per-IP failure count, restarting it from 0', async () => {
+		let t = 0;
+		const a = createAuth({ file, now: () => t });
+		await a.setPassword(PW);
+		for (let i = 0; i < 4; i++) expect(await a.authenticate({ password: 'wrong wrong wrong' }, '7.7.7.7')).toEqual({ ok: false, error: 'invalid password' });
+		expect((await a.authenticate({ password: PW }, '7.7.7.7')).ok).toBe(true);
+		// If the per-IP entry had NOT been cleared by the success above, cumulative failures would
+		// already be at 4 here, and just one more wrong attempt would cross LOCKOUT_THRESHOLD (5) --
+		// the very next call after it would then report the lock instead of 'invalid password'. All
+		// four succeeding as 'invalid password' proves the counter actually restarted from 0.
+		for (let i = 0; i < 4; i++) expect(await a.authenticate({ password: 'wrong wrong wrong' }, '7.7.7.7')).toEqual({ ok: false, error: 'invalid password' });
+		// The 5th cumulative failure since the reset crosses the threshold and engages the lock; that
+		// failing call still reports the password as wrong (as in "locks an IP after 5 wrong passwords"
+		// above) -- the lock itself surfaces on the next attempt.
+		expect(await a.authenticate({ password: 'wrong wrong wrong' }, '7.7.7.7')).toEqual({ ok: false, error: 'invalid password' });
+		expect(await a.authenticate({ password: PW }, '7.7.7.7')).toEqual({ ok: false, error: TOO_MANY_ATTEMPTS_ERROR });
+	}, 60_000);
 	it('resolves storage failures instead of rejecting authenticate()', async () => {
 		const a = createAuth({ file });
 		await a.setPassword(PW);
