@@ -18,6 +18,7 @@ export interface RemoteAuth {
 export const MIN_PASSWORD_LENGTH = 12;
 export const TOO_MANY_ATTEMPTS_ERROR = 'too many attempts -- try again later';
 export const NO_PASSWORD_ERROR = 'no password set';
+export const STORAGE_FAILED_ERROR = 'storage failed';
 
 const DEVICE_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const LOCKOUT_THRESHOLD = 5;
@@ -44,9 +45,14 @@ async function withKdfSlot<T>(fn: () => Promise<T>): Promise<T | 'overloaded'> {
 	kdfActive++;
 	try { return await fn(); }
 	finally {
-		const next = kdfWaiters.shift();
-		if (next) next(); else kdfActive--;
+		kdfActive--;
+		kdfWaiters.shift()?.();
 	}
+}
+
+/** Test-only: exposes the KDF concurrency gate's internal counters so tests can assert no leak. */
+export function _kdfState(): { active: number; queued: number } {
+	return { active: kdfActive, queued: kdfWaiters.length };
 }
 
 function scryptAsync(password: string, salt: Buffer, keylen: number, options: ScryptOptions): Promise<Buffer> {
@@ -68,7 +74,7 @@ export async function verifyPassword(stored: string, plain: string): Promise<boo
 	if (n > MAX_N || (n & (n - 1)) !== 0 || r > MAX_R || p > MAX_P) return false;
 	const salt = Buffer.from(parts[4]!, 'hex');
 	const expected = Buffer.from(parts[5]!, 'hex');
-	if (expected.length === 0) return false;
+	if (expected.length !== SCRYPT_KEYLEN) return false;
 	try {
 		const key = await scryptAsync(plain, salt, expected.length, { N: n, r, p, maxmem: SCRYPT_MAXMEM });
 		return key.length === expected.length && timingSafeEqual(key, expected);
@@ -106,9 +112,14 @@ export function createAuth(deps: { file: string; now?: () => number; onDevicesRe
 	const now = deps.now ?? Date.now;
 	const store = loadAuthStore(deps.file);
 	const save = (): void => saveAuthStore(deps.file, store);
+	/** Never throws: a write failure is reported to the caller, not raised as a rejection. */
+	function trySave(): boolean {
+		try { saveAuthStore(deps.file, store); return true; }
+		catch (err) { console.error('[remote] auth store write failed:', err); return false; }
+	}
 
-	const lockouts = new Map<string, { failCount: number; lockedUntil: number | null; lastFailAt: number }>();
-	const global = { count: 0, windowStart: 0, lockedUntil: 0 };
+	const lockouts = new Map<string, { failCount: number; lockedUntil: number | null; lastFailAt: number; inflight: number }>();
+	const account = { count: 0, windowStart: 0, lockedUntil: 0, inflight: 0 };
 	let lastPrune = 0;
 
 	function pruneLockouts(): void {
@@ -123,14 +134,14 @@ export function createAuth(deps: { file: string; now?: () => number; onDevicesRe
 	}
 	function recordFailure(ip: string): void {
 		const t = now();
-		const e = lockouts.get(ip) ?? { failCount: 0, lockedUntil: null, lastFailAt: t };
+		const e = lockouts.get(ip) ?? { failCount: 0, lockedUntil: null, lastFailAt: t, inflight: 0 };
 		e.failCount++; e.lastFailAt = t;
 		if (e.failCount >= LOCKOUT_THRESHOLD) { e.lockedUntil = t + LOCKOUT_DURATION_MS; e.failCount = 0; }
 		lockouts.set(ip, e);
-		if (t - global.windowStart > GLOBAL_LOCKOUT_WINDOW_MS) { global.windowStart = t; global.count = 0; }
-		global.count++;
-		if (global.count >= GLOBAL_LOCKOUT_THRESHOLD) {
-			global.lockedUntil = t + GLOBAL_LOCKOUT_DURATION_MS; global.count = 0; global.windowStart = t;
+		if (t - account.windowStart > GLOBAL_LOCKOUT_WINDOW_MS) { account.windowStart = t; account.count = 0; }
+		account.count++;
+		if (account.count >= GLOBAL_LOCKOUT_THRESHOLD) {
+			account.lockedUntil = t + GLOBAL_LOCKOUT_DURATION_MS; account.count = 0; account.windowStart = t;
 			console.error('[remote] account-wide password cool-off engaged');
 		}
 	}
@@ -139,17 +150,21 @@ export function createAuth(deps: { file: string; now?: () => number; onDevicesRe
 		const removed = store.devices.filter(select).map((d) => d.id);
 		if (removed.length === 0) return [];
 		store.devices = store.devices.filter((d) => !removed.includes(d.id));
-		save();
+		trySave();
 		try { deps.onDevicesRevoked?.(removed); } catch (err) { console.error('[remote] onDevicesRevoked threw:', err); }
 		return removed;
 	}
 
+	/** Rolls back the in-memory push if persisting fails, so authenticate() never hands out a token it couldn't record. */
 	function mintDevice(label: string | undefined): AuthResult {
 		const token = randomBytes(32).toString('hex');
 		const t = now();
 		const device: DeviceRecord = { id: randomUUID(), label: (label ?? 'device').slice(0, MAX_DEVICE_LABEL_LENGTH), tokenHash: hashToken(token), createdAt: t, lastSeen: t };
 		store.devices.push(device);
-		save();
+		if (!trySave()) {
+			store.devices.pop();
+			return { ok: false, error: STORAGE_FAILED_ERROR };
+		}
 		return { ok: true, deviceToken: token, deviceId: device.id };
 	}
 
@@ -158,13 +173,26 @@ export function createAuth(deps: { file: string; now?: () => number; onDevicesRe
 		pruneLockouts();
 		const e = lockouts.get(ip);
 		if (e && e.lockedUntil !== null && now() < e.lockedUntil) return { ok: false, error: TOO_MANY_ATTEMPTS_ERROR };
-		if (now() < global.lockedUntil) return { ok: false, error: TOO_MANY_ATTEMPTS_ERROR };
-		const verdict = await withKdfSlot(() => verifyPassword(store.passwordHash!, plain));
-		if (verdict === 'overloaded') return { ok: false, error: TOO_MANY_ATTEMPTS_ERROR };
-		if (!verdict) { recordFailure(ip); return { ok: false, error: 'invalid password' }; }
-		lockouts.delete(ip);
-		global.count = 0;
-		return mintDevice(label);
+		if (now() < account.lockedUntil) return { ok: false, error: TOO_MANY_ATTEMPTS_ERROR };
+		// Reserve a slot before the KDF await: gating on failCount/count alone (read-before-await) lets
+		// a burst of concurrent attempts blow past the threshold before any of them records a failure.
+		if ((e?.failCount ?? 0) + (e?.inflight ?? 0) >= LOCKOUT_THRESHOLD) return { ok: false, error: TOO_MANY_ATTEMPTS_ERROR };
+		if (account.count + account.inflight >= GLOBAL_LOCKOUT_THRESHOLD) return { ok: false, error: TOO_MANY_ATTEMPTS_ERROR };
+		const entry = e ?? { failCount: 0, lockedUntil: null, lastFailAt: now(), inflight: 0 };
+		entry.inflight++;
+		lockouts.set(ip, entry);
+		account.inflight++;
+		try {
+			const verdict = await withKdfSlot(() => verifyPassword(store.passwordHash!, plain));
+			if (verdict === 'overloaded') return { ok: false, error: TOO_MANY_ATTEMPTS_ERROR };
+			if (!verdict) { recordFailure(ip); return { ok: false, error: 'invalid password' }; }
+			lockouts.delete(ip);
+			account.count = 0;
+			return mintDevice(label);
+		} finally {
+			entry.inflight--;
+			account.inflight--;
+		}
 	}
 
 	function tryDeviceToken(raw: string): AuthResult {
@@ -172,10 +200,12 @@ export function createAuth(deps: { file: string; now?: () => number; onDevicesRe
 		for (const d of store.devices) {
 			if (!tokensMatch(d.tokenHash, candidate)) continue;
 			if (now() - d.lastSeen > DEVICE_TOKEN_TTL_MS) {
-				store.devices = store.devices.filter((x) => x.id !== d.id); save();
+				store.devices = store.devices.filter((x) => x.id !== d.id);
+				trySave(); // non-fatal: the token is expired either way, in-memory removal stands
 				return { ok: false, error: 'device token expired' };
 			}
-			d.lastSeen = now(); save();
+			d.lastSeen = now();
+			trySave(); // non-fatal: a failed lastSeen slide just means the next expiry check is slightly stale
 			return { ok: true, deviceId: d.id };
 		}
 		return { ok: false, error: 'unknown device token' };
@@ -195,7 +225,9 @@ export function createAuth(deps: { file: string; now?: () => number; onDevicesRe
 			const removed = destroyDevices(() => true);
 			return { devicesSignedOut: removed.length };
 		},
-		listDevices: () => store.devices.map(({ id, label, createdAt, lastSeen }) => ({ id, label, createdAt, lastSeen })),
+		listDevices: () => store.devices
+			.filter((d) => now() - d.lastSeen <= DEVICE_TOKEN_TTL_MS)
+			.map(({ id, label, createdAt, lastSeen }) => ({ id, label, createdAt, lastSeen })),
 		revokeDevice: (id) => destroyDevices((d) => d.id === id).length > 0,
 	};
 }
