@@ -19,7 +19,7 @@ A standalone desktop app (Electron). Windows-first.
 - **Park & reopen** — unfinished work is auto-saved as a recoverable commit when things close; one click brings it back. Minimized terminals keep their sessions alive and resurface from the Coordination panel or the ⚠ attention badge.
 - **Workspaces** — independent floors of terminals (Alt+↑/↓ to cycle), each with its own repos and coordination dir.
 - **Usage battery** — a topbar meter for your Claude limits: session, week, and Fable week, with a click-open detail popover, manual ⟳ (a fresh probe session every time), and a 60 s auto-refresh toggle.
-- **Phone floor view** — a token-guarded HTTP view of the floor (e.g. over Tailscale) to check terminals, fire off spawns, and talk (type or dictate) directly into a live session from your phone; voice input needs an HTTPS URL, so run `tailscale serve` once.
+- **Browser mirror (Tailscale)** — open `http://<tailscale-ip>:7420/` from any machine on your tailnet: the same tiles, Kane, spawn and workspace controls, typing straight into live sessions. Set a password once in the desktop 📱 panel (12+ chars); browsers get a 30-day device token you can revoke there. The server binds only to loopback and your Tailscale IPs. The phone page still lives at `/phone?t=…` (URLs in the same panel); for voice run `tailscale serve --bg 7420` once. The browser follows the desktop's terminal size and never resizes the PTY. Alt+F4 closes the browser tab on Windows, so reach tile 4 by clicking it or with Alt+←/→.
 - **Journal tiles** — dictate/type a journal entry in a tile; optionally convert it into a Linear issue via your configured team.
 - **Agent chat** — pull two or more terminals into a group chat you can message (hidden by default; see `terminals-grid.ts`).
 

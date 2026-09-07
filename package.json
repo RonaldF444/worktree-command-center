@@ -39,6 +39,7 @@
     },
     "files": [
       "dist/**",
+      "dist/web/**",
       "index.html",
       "app.css",
       "styles.css",

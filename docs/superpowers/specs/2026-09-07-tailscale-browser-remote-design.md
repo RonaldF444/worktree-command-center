@@ -25,6 +25,8 @@ reduced to LAN mode, no relay, no email codes.
 | Bind address | 127.0.0.1 + Tailscale IP only. Never LAN. |
 | Terminal size | Browser follows the desktop's PTY size. Browser never resizes the PTY. |
 | Old phone page | Kept, moved to `/phone`, unchanged behaviour and token scheme |
+| Device list/revoke from the browser | Not exposed; desktop-only (matches The Spire) |
+| Alt+F4 in the browser | Not remappable (closes the tab on Windows); click or Alt+←/→ instead |
 
 ## Why Way B
 
