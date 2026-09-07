@@ -45,7 +45,7 @@ export function createRendererRpc(deps: {
 		handleReply(r) {
 			if (!r || typeof r !== 'object') return;
 			const { id, ok, value, error } = r as Partial<RpcReply>;
-			if (typeof id !== 'string') return;
+			if (typeof id !== 'string' || typeof ok !== 'boolean') return;
 			const p = settle(id);
 			if (!p) return;
 			if (ok) p.resolve(value);

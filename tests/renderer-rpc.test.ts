@@ -41,6 +41,13 @@ describe('createRendererRpc', () => {
 		await expect(a).rejects.toThrow('request failed');
 		await expect(b).rejects.toThrow('request failed');
 	});
+	it('ignores a reply whose ok is not a boolean, leaving the invoke pending', () => {
+		const sent: any[] = [];
+		const rpc = createRendererRpc({ send: (m) => sent.push(m) });
+		void rpc.invoke('x', null);
+		rpc.handleReply({ id: sent[0].id, ok: 'yes', value: 1 });
+		expect(rpc.pendingCount()).toBe(1);
+	});
 	it('uses distinct ids', () => {
 		const sent: any[] = [];
 		const rpc = createRendererRpc({ send: (m) => sent.push(m) });

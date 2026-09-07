@@ -14,7 +14,8 @@ export const CONFIG_PUBLIC_KEYS = ['repos', 'workspaces', 'activeWorkspace', 'th
 export function createRemoteHandlers(deps: HandlerDeps): HandlerTable {
 	const table: HandlerTable = {
 		'config:get': async () => {
-			const cfg = (deps.readConfig() ?? {}) as Record<string, unknown>;
+			const raw = deps.readConfig();
+			const cfg = (raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {}) as Record<string, unknown>;
 			const out: Record<string, unknown> = {};
 			for (const k of CONFIG_PUBLIC_KEYS) if (k in cfg) out[k] = cfg[k];
 			return out;

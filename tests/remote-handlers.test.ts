@@ -19,6 +19,14 @@ describe('createRemoteHandlers', () => {
 		expect(await t['config:get']!(undefined)).toEqual({ repos: [{ name: 'r', path: 'C:\\r' }], theme: 'iris' });
 		expect(CONFIG_PUBLIC_KEYS).toEqual(['repos', 'workspaces', 'activeWorkspace', 'theme']);
 	});
+	it('config:get resolves {} for a non-object config', async () => {
+		const t = createRemoteHandlers({ rpc: fakeRpc().rpc, readConfig: () => 'garbage' });
+		expect(await t['config:get']!(undefined)).toEqual({});
+	});
+	it('config:get resolves {} for a null config', async () => {
+		const t = createRemoteHandlers({ rpc: fakeRpc().rpc, readConfig: () => null });
+		expect(await t['config:get']!(undefined)).toEqual({});
+	});
 	it('forwards a valid payload as its parsed form', async () => {
 		const f = fakeRpc();
 		const t = createRemoteHandlers({ rpc: f.rpc, readConfig: () => ({}) });
