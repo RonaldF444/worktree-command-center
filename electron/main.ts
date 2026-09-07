@@ -2,13 +2,21 @@ import { app, BrowserWindow, ipcMain, dialog, clipboard, shell } from 'electron'
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
-import { startRemoteServer } from './remote-server';
-import { remoteInfoPath, removeRemoteInfo } from './remote-info';
-import { pickHosts, accessUrls, httpsUrlFor, hasServeHandlerFor } from './remote-net';
+import { createPhoneRoutes } from './remote-server';
+import { remoteInfoPath, writeRemoteInfo, removeRemoteInfo } from './remote-info';
+import { pickHosts, accessUrls, httpsUrlFor, hasServeHandlerFor, tailscaleIps, browserUrls } from './remote-net';
+import { randomBytes } from 'crypto';
+import { startGateway, type GatewayHandle } from './remote/gateway';
+import { createAuth } from './remote/auth';
+import { createRendererRpc } from './remote/renderer-rpc';
+import { createRemoteHandlers } from './remote/handlers';
 import { Worker } from 'worker_threads';
 
 const REMOTE_PORT = 7420;
 let win: BrowserWindow | null = null;
+let gateway: GatewayHandle | null = null;
+let floorState: unknown = { workspaces: [], centeredId: null, kane: null, terminals: [], repos: [] };
+const phoneToken = randomBytes(8).toString('hex');
 
 // Chromium's native window-occlusion detection misfires on this machine's display topology
 // (virtual display adapters), throttling the renderer to ~1Hz while it looks "occluded" —
@@ -98,14 +106,51 @@ function createWindow(): void {
 		return r.canceled ? null : r.filePaths[0];
 	});
 
-	// Phone floor view: HTTP server (Tailscale-reachable) + the access info for the topbar panel.
-	const { token } = startRemoteServer({ port: REMOTE_PORT, getWindow: () => win });
-	ipcMain.handle('remote:info', async () => ({
-		token,
+	// Browser mirror + phone floor view: one gateway, loopback + Tailscale only (spec 2026-09-07).
+	const webDir = app.isPackaged ? path.join(process.resourcesPath, 'app.asar', 'dist', 'web') : path.join(__dirname, 'web');
+	const auth = createAuth({ file: path.join(userData, 'remote-auth.json'), onDevicesRevoked: (ids) => gateway?.endDeviceSessions(ids) });
+	const rpc = createRendererRpc({ send: (m) => { if (!win || win.isDestroyed()) throw new Error('no window'); win.webContents.send('remote:invoke', m); } });
+	ipcMain.removeAllListeners('remote:state'); ipcMain.removeAllListeners('remote:reply'); ipcMain.removeAllListeners('remote:event');
+	ipcMain.on('remote:state', (_e, s: unknown) => { floorState = s; });
+	ipcMain.on('remote:reply', (_e, r: unknown) => rpc.handleReply(r));
+	ipcMain.on('remote:event', (_e, m: { channel?: unknown; payload?: unknown }) => { if (typeof m?.channel === 'string') gateway?.broadcast(m.channel, m.payload); });
+	win.webContents.on('did-start-loading', () => rpc.rejectAll());
+	win.on('closed', () => rpc.rejectAll());
+	const readConfig = (): unknown => { try { return JSON.parse(fs.readFileSync(path.join(userData, 'config.json'), 'utf8')); } catch { return {}; } };
+	const tsIps = (): string[] => tailscaleIps(os.networkInterfaces());
+	void startGateway({
 		port: REMOTE_PORT,
-		urls: accessUrls(pickHosts(os.networkInterfaces(), os.hostname()), REMOTE_PORT, token),
-		httpsUrl: httpsUrlFor(await tailscaleVoiceDnsName(REMOTE_PORT), token),
-	}));
+		hosts: ['127.0.0.1', ...tsIps()],
+		staticDir: webDir,
+		table: createRemoteHandlers({ rpc, readConfig }),
+		authenticate: (frame, ip) => auth.authenticate(frame, ip),
+		phoneRoutes: createPhoneRoutes({ token: phoneToken, getFloor: () => floorState, onAction: (a) => win?.webContents.send('remote:action', a) }),
+		// tailscale serve fronts us with the MagicDNS name as Host (Task 6 ruling).
+		allowHost: (h) => h.endsWith('.ts.net'),
+	}).then((gw) => {
+		gateway = gw;
+		gw.onClientCount((n) => win?.webContents.send('remote:clients', n));
+		writeRemoteInfo(remoteInfoPath(), { url: `http://127.0.0.1:${gw.boundPort()}/phone`, token: phoneToken });
+		// Tailscale often finishes starting after we do: re-check once a minute and bind late.
+		const rebind = setInterval(() => { for (const ip of tsIps()) if (!gw.boundHosts().includes(ip)) void gw.addHost(ip); }, 60_000);
+		rebind.unref();
+	}).catch((err) => console.error('[remote] gateway failed to start:', err));
+
+	ipcMain.handle('remote:info', async () => {
+		const hosts = gateway?.boundHosts() ?? ['127.0.0.1'];
+		return {
+			token: phoneToken,
+			port: REMOTE_PORT,
+			urls: accessUrls(pickHosts(os.networkInterfaces(), os.hostname()).filter((h) => hosts.includes(h) || !/^\d/.test(h)), REMOTE_PORT, phoneToken),
+			httpsUrl: httpsUrlFor(await tailscaleVoiceDnsName(REMOTE_PORT), phoneToken),
+			browserUrls: browserUrls(hosts.filter((h) => h !== '127.0.0.1'), REMOTE_PORT),
+			tailscaleUp: hosts.length > 1,
+		};
+	});
+	ipcMain.handle('remote:password:set', (_e, pw: unknown) => auth.setPassword(String(pw ?? '')));
+	ipcMain.handle('remote:password:has', () => auth.hasPassword());
+	ipcMain.handle('remote:devices', () => auth.listDevices());
+	ipcMain.handle('remote:devices:revoke', (_e, id: unknown) => auth.revokeDevice(String(id ?? '')));
 }
 
 // Clipboard lives in the MAIN process (renderer-side electron.clipboard is deprecated).
@@ -248,4 +293,4 @@ app.on('window-all-closed', () => {
 
 // Drop the phone-floor access file so a stale token doesn't linger pointing at a dead port
 // once this process exits.
-app.on('before-quit', () => removeRemoteInfo(remoteInfoPath()));
+app.on('before-quit', () => { removeRemoteInfo(remoteInfoPath()); void gateway?.close(); });

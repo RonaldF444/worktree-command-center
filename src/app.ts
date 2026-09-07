@@ -34,7 +34,7 @@ declare global {
 			addFolder(): Promise<string | null>;
 			pushFloorState(s: unknown): void;
 			onRemoteAction(cb: (a: { type: string; id?: number | string; repo?: string; base?: string | null; task?: string; text?: string; name?: string }) => void): void;
-			remoteInfo(): Promise<{ token: string; port: number; urls: string[]; httpsUrl: string | null; browserUrls: string[] }>;
+			remoteInfo(): Promise<{ token: string; port: number; urls: string[]; httpsUrl: string | null; browserUrls: string[]; tailscaleUp: boolean }>;
 			onRemoteInvoke(cb: (m: { id: string; channel: string; payload: unknown }) => void): void;
 			remoteReply(r: { id: string; ok: boolean; value?: unknown; error?: string }): void;
 			remoteEvent(channel: string, payload: unknown): void;
@@ -401,6 +401,35 @@ async function main(): Promise<void> {
 			panel.createDiv({ cls: 'wcc-phone-sub', text: 'Open one of these on your phone (same Tailscale network):' });
 			const urlsBox = panel.createDiv();
 			urlsBox.createDiv({ cls: 'wcc-phone-sub', text: 'Loading…' });
+			panel.createDiv({ cls: 'wcc-phone-h', text: '🖥 Browser (Tailscale)' });
+			const browserBox = panel.createDiv();
+			const pwRow = panel.createDiv({ cls: 'wcc-phone-row' });
+			const pwInput = pwRow.createEl('input', { type: 'password', placeholder: 'New password (12+ chars)', cls: 'wcc-phone-pw' });
+			const pwBtn = pwRow.createEl('button', { text: 'Set password' });
+			const pwNote = panel.createDiv({ cls: 'wcc-phone-sub' });
+			const devicesBox = panel.createDiv();
+			const renderDevices = (): void => {
+				devicesBox.empty();
+				void window.wcc.remoteDevices().then((list) => {
+					if (phonePanel !== panel) return;
+					if (list.length === 0) { devicesBox.createDiv({ cls: 'wcc-phone-sub', text: 'No devices signed in.' }); return; }
+					for (const d of list) {
+						const row = devicesBox.createDiv({ cls: 'wcc-phone-row' });
+						row.createSpan({ text: `${d.label || 'device'} · last seen ${new Date(d.lastSeen).toLocaleString()}` });
+						const rv = row.createEl('button', { text: 'Revoke' });
+						rv.addEventListener('click', () => void window.wcc.remoteDeviceRevoke(d.id).then(renderDevices));
+					}
+				});
+			};
+			pwBtn.addEventListener('click', () => {
+				void window.wcc.remotePasswordSet(pwInput.value).then((r) => {
+					pwInput.value = '';
+					pwNote.setText(`Password set. ${r.devicesSignedOut} device(s) signed out.`);
+					renderDevices();
+				}).catch((e) => pwNote.setText(String((e as Error).message ?? e).replace(/^.*Error: /, '')));
+			});
+			void window.wcc.remoteHasPassword().then((has) => { if (phonePanel === panel && !has) pwNote.setText('No password yet — set one to enable browser login.'); });
+			renderDevices();
 			const close = panel.createEl('button', { cls: 'wcc-phone-close', text: 'Close' });
 			close.addEventListener('click', () => { phonePanel?.remove(); phonePanel = null; });
 			void window.wcc.remoteInfo().then((info) => {
@@ -414,6 +443,9 @@ async function main(): Promise<void> {
 				}
 				urlsBox.empty();
 				for (const u of info.urls) urlsBox.createEl('div', { cls: 'wcc-phone-url', text: u });
+				browserBox.empty();
+				if (!info.tailscaleUp) browserBox.createDiv({ cls: 'wcc-phone-sub', text: 'Tailscale IP not found — browser access is local-only right now.' });
+				for (const u of info.browserUrls) browserBox.createEl('div', { cls: 'wcc-phone-url', text: u });
 			}).catch(() => {
 				// Belt-and-braces: main.ts degrades tailscale failures to null internally, but this
 				// still guards against remote:info rejecting for some other reason (e.g. IPC itself
