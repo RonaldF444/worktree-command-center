@@ -1,5 +1,7 @@
 import type { Bridge } from './bridge';
 
+let loginSeq = 0;
+
 /** Allow-list: the server's error strings are fixed literals, but nothing else is ever echoed. */
 export function describeAuthFailure(error: string | undefined): string {
 	switch (error) {
@@ -28,9 +30,10 @@ export function mountLogin(root: HTMLElement, bridge: Bridge, onDone: () => void
 	const form = box.createEl('form', { cls: 'web-login-form' });
 	const pw = form.createEl('input', { type: 'password', placeholder: 'Password', cls: 'web-login-pw', attr: { autocomplete: 'current-password', autofocus: 'true' } });
 	const rememberRow = form.createDiv({ cls: 'web-login-row' });
-	const remember = rememberRow.createEl('input', { type: 'checkbox', attr: { id: 'remember' } });
+	const rememberId = `web-login-remember-${++loginSeq}`;
+	const remember = rememberRow.createEl('input', { type: 'checkbox', attr: { id: rememberId } });
 	remember.checked = true;
-	rememberRow.createEl('label', { text: 'Remember this device for 30 days', attr: { for: 'remember' } });
+	rememberRow.createEl('label', { text: 'Remember this device for 30 days', attr: { for: rememberId } });
 	const btn = form.createEl('button', { text: 'Sign in', cls: 'web-login-btn', attr: { type: 'submit' } });
 	const err = box.createDiv({ cls: 'web-login-err' });
 
@@ -44,8 +47,9 @@ export function mountLogin(root: HTMLElement, bridge: Bridge, onDone: () => void
 			if (!o.ok) { err.setText(describeAuthFailure(o.error)); pw.select(); }
 		});
 	});
-	const offStatus = bridge.onStatus((s) => {
-		if (s === 'open') { onDone(); return; }
+	let offStatus: () => void = () => {};
+	offStatus = bridge.onStatus((s) => {
+		if (s === 'open') { offStatus(); onDone(); return; }
 		sub.setText(s === 'login' ? 'Enter the password from the desktop app.' : s === 'offline' ? 'Desktop unreachable. Retrying…' : 'Connecting to the desktop…');
 		btn.disabled = s !== 'login';
 	});
