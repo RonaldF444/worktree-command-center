@@ -23,4 +23,14 @@ const privateEntry = existsSync('private/index.ts') ? path.resolve('private/inde
 // whole bundle in a function so nothing leaks to global; require() is still global.
 await esbuild.build({ ...common, entryPoints: ['src/app.ts'], outfile: 'dist/renderer.js', platform: 'node', format: 'iife', external: ['electron', 'node-pty'], alias: { 'wcc-private': privateEntry } });
 
-console.log('esbuild: built main, preload, renderer');
+// Browser mirror bundle (spec 2026-09-07): a plain-browser build of src/web. platform 'browser'
+// makes any accidental Node import (fs, path, child_process, electron) a hard build error.
+mkdirSync('dist/web', { recursive: true });
+await esbuild.build({ ...common, entryPoints: ['src/web/main.ts'], outfile: 'dist/web/app.js', platform: 'browser', format: 'iife', define: { 'process.env.NODE_ENV': '"production"' } });
+copyFileSync('web/index.html', 'dist/web/index.html');
+copyFileSync('web/web.css', 'dist/web/web.css');
+copyFileSync('app.css', 'dist/web/app.css');
+copyFileSync('styles.css', 'dist/web/styles.css');
+copyFileSync('node_modules/@xterm/xterm/css/xterm.css', 'dist/web/xterm.css');
+
+console.log('esbuild: built main, preload, renderer, web');
