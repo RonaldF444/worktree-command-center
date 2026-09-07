@@ -1,4 +1,4 @@
-import { EFFORT_LEVELS } from '../src/terminals/god';
+import { EFFORT_LEVELS } from '../src/terminals/spawn-options';
 
 /** The actions the phone may send, validated in the MAIN process before they reach the
  *  renderer. The page is token-gated, but a typo'd or hostile body must never become a

@@ -27,6 +27,7 @@ import { LinearConvertProbe, type LinearConvertConfig } from './linear-convert-p
 import type { StageTile } from './stage-tile';
 import { PortRegistry, type PortItem } from './port-registry';
 import { KANE_ID } from '../../electron/remote-actions';
+import { SPAWN_MODELS, SPAWN_EFFORTS } from './spawn-options';
 
 export interface RepoConfig { name: string; path: string; remote?: string; group?: string; }
 /** One tile as the phone sees it. `output` rides along ONLY for the focused tile — the phone
@@ -55,21 +56,6 @@ export interface GridDeps {
 	promptForTopic: (title: string, placeholder: string, initial?: string, okLabel?: string) => Promise<string | null>;
 }
 interface SessionRecord { worktreePath: string; branch: string; repoName: string; repoPath: string; baseBranch: string; name?: string; hidden?: boolean; kind?: 'terminal' | 'journal' | 'god'; journalSlug?: string; model?: string; effort?: string; lastActivity?: number; }
-
-// Model options for the spawn toolbar dropdown. Empty value = inherit the claude CLI default.
-const SPAWN_MODELS: { label: string; value: string }[] = [
-	{ label: 'Model: Default', value: '' },
-	{ label: 'Opus 4.8', value: 'claude-opus-4-8' },
-	{ label: 'Sonnet 5', value: 'claude-sonnet-5' },
-	{ label: 'Fable 5', value: 'claude-fable-5' },
-	{ label: 'Haiku 4.5', value: 'claude-haiku-4-5-20251001' },
-];
-
-// Effort options for the spawn toolbar dropdown. Empty value = inherit the claude CLI default.
-const SPAWN_EFFORTS: { label: string; value: string }[] = [
-	{ label: 'Effort: Default', value: '' },
-	...EFFORT_LEVELS.map((l) => ({ label: l === 'xhigh' ? 'XHigh' : l[0]!.toUpperCase() + l.slice(1), value: l })),
-];
 
 // How long a manual tile choice (click / Alt+F-key / resurfacing) suppresses auto-centering.
 const MANUAL_HOLD_MS = 30_000;
