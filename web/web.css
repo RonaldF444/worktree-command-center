@@ -34,3 +34,4 @@ html, body { height: 100%; margin: 0; background: var(--background-primary); col
 .web-login-btn:disabled { opacity: .5; cursor: default; }
 .web-login-err { color: #d21e12; font-size: 12px; margin-top: 10px; min-height: 16px; }
 .web-usage { margin-left: auto; }
+.web-ports { margin-left: 8px; }

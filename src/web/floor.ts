@@ -1,6 +1,7 @@
 import type { Bridge } from './bridge';
 import { WebTile } from './tile';
 import { diffIds } from './diff';
+import { WebPortsWidget } from './ports';
 import { settledLayout, centeredLayout, keyForIndex, keyToIndex, nextSpotlight } from '../terminals/bubble-layout';
 import { SPAWN_MODELS, SPAWN_EFFORTS } from '../terminals/spawn-options';
 import { normalizeTheme, setActiveTheme, activeTerminalPalette } from '../terminals/theme-store';
@@ -24,6 +25,8 @@ export function mountFloor(root: HTMLElement, bridge: Bridge): () => void {
 	top.createSpan({ cls: 'wcc-brand', text: '🌳 Worktree Command Center · browser' });
 	const status = top.createSpan({ cls: 'wcc-status', text: '' });
 	const usage = top.createSpan({ cls: 'wcc-usage-session web-usage', text: '' });
+	const ports = new WebPortsWidget({ onCenter: (id) => void bridge.invoke('tile:center', { id }), pageHost: () => location.hostname });
+	ports.render(top);
 	const logout = top.createEl('button', { text: 'Sign out' });
 	logout.addEventListener('click', () => bridge.logout());
 	const tabs = root.createDiv({ cls: 'wcc-tabs' });
@@ -127,6 +130,7 @@ export function mountFloor(root: HTMLElement, bridge: Bridge): () => void {
 			usage.setText('');
 		}
 		status.setText(`${next.terminals.length} sessions`);
+		ports.update(next.ports ?? []);
 		// tiles
 		const wanted = next.terminals.filter((t) => !t.hidden).map((t) => t.id);
 		const { added, removed } = diffIds([...tiles.keys()], wanted);
@@ -182,6 +186,7 @@ export function mountFloor(root: HTMLElement, bridge: Bridge): () => void {
 		window.removeEventListener('resize', onResize); ro.disconnect();
 		document.removeEventListener('keydown', onKeyDown, true); document.removeEventListener('keyup', onKeyUp, true);
 		for (const t of tiles.values()) t.dispose(); tiles.clear(); kane?.dispose();
+		ports.dispose();
 		root.empty();
 	};
 }

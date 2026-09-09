@@ -7,6 +7,7 @@ import { remoteInfoPath, writeRemoteInfo, removeRemoteInfo } from './remote-info
 import { pickHosts, accessUrls, httpsUrlFor, hasServeHandlerFor, tailscaleIps, browserUrls } from './remote-net';
 import { randomBytes } from 'crypto';
 import { startGateway, type GatewayHandle } from './remote/gateway';
+import { createPortForwarder, type PortForwarder } from './port-forward';
 import { createAuth } from './remote/auth';
 import { createRendererRpc } from './remote/renderer-rpc';
 import { createRemoteHandlers } from './remote/handlers';
@@ -15,6 +16,7 @@ import { Worker } from 'worker_threads';
 const REMOTE_PORT = 7420;
 let win: BrowserWindow | null = null;
 let gateway: GatewayHandle | null = null;
+let forwarder: PortForwarder | null = null;
 let gatewayUp = false;
 let floorState: unknown = { workspaces: [], centeredId: null, kane: null, terminals: [], repos: [] };
 const phoneToken = randomBytes(8).toString('hex');
@@ -128,10 +130,27 @@ function createWindow(): void {
 	const webDir = app.isPackaged ? path.join(process.resourcesPath, 'app.asar', 'dist', 'web') : path.join(__dirname, 'web');
 	const auth = createAuth({ file: path.join(userData, 'remote-auth.json'), onDevicesRevoked: (ids) => gateway?.endDeviceSessions(ids) });
 	const rpc = createRendererRpc({ send: (m) => { if (!win || win.isDestroyed()) throw new Error('no window'); win.webContents.send('remote:invoke', m); } });
+	// Dev-server tunnels for the browser mirror: every localhost port the floor state lists gets
+	// a listener on the SAME port on each Tailscale IP (never LAN), piped to 127.0.0.1.
+	void forwarder?.close(); // a re-created window must not leak the old tunnels
+	forwarder = createPortForwarder({ log: (msg) => console.warn(msg) });
+	let forwardPorts: number[] = [];
+	const syncForwards = (payload?: unknown): void => {
+		if (payload !== undefined) {
+			const list = (payload as { ports?: unknown } | null)?.ports;
+			const ports = Array.isArray(list) ? list as Array<{ host?: unknown; port?: unknown }> : [];
+			forwardPorts = [...new Set(ports.filter((p) => p?.host === 'localhost' && Number.isInteger(p.port) && (p.port as number) > 0 && (p.port as number) < 65536).map((p) => p.port as number))];
+		}
+		void forwarder?.sync(forwardPorts, tailscaleIps(os.networkInterfaces()));
+	};
 	ipcMain.removeAllListeners('remote:state'); ipcMain.removeAllListeners('remote:reply'); ipcMain.removeAllListeners('remote:event');
 	ipcMain.on('remote:state', (_e, s: unknown) => { floorState = s; });
 	ipcMain.on('remote:reply', (_e, r: unknown) => rpc.handleReply(r));
-	ipcMain.on('remote:event', (_e, m: { channel?: unknown; payload?: unknown }) => { if (typeof m?.channel === 'string') gateway?.broadcast(m.channel, m.payload); });
+	ipcMain.on('remote:event', (_e, m: { channel?: unknown; payload?: unknown }) => {
+		if (typeof m?.channel !== 'string') return;
+		gateway?.broadcast(m.channel, m.payload);
+		if (m.channel === 'floor:state') syncForwards(m.payload);
+	});
 	win.webContents.on('did-start-loading', () => rpc.rejectAll());
 	win.on('closed', () => rpc.rejectAll());
 	const readConfig = (): unknown => { try { return JSON.parse(fs.readFileSync(path.join(userData, 'config.json'), 'utf8')); } catch { return {}; } };
@@ -152,7 +171,7 @@ function createWindow(): void {
 		gw.onClientCount((n) => win?.webContents.send('remote:clients', n));
 		writeRemoteInfo(remoteInfoPath(), { url: `http://127.0.0.1:${gw.boundPort()}/phone`, token: phoneToken });
 		// Tailscale often finishes starting after we do: re-check once a minute and bind late.
-		const rebind = setInterval(() => { for (const ip of tsIps()) if (!gw.boundHosts().includes(ip)) void gw.addHost(ip); }, 60_000);
+		const rebind = setInterval(() => { for (const ip of tsIps()) if (!gw.boundHosts().includes(ip)) void gw.addHost(ip); syncForwards(); }, 60_000);
 		rebind.unref();
 	}).catch((err) => {
 		console.error('[remote] gateway failed to start:', err);
@@ -317,4 +336,4 @@ app.on('window-all-closed', () => {
 
 // Drop the phone-floor access file so a stale token doesn't linger pointing at a dead port
 // once this process exits.
-app.on('before-quit', () => { removeRemoteInfo(remoteInfoPath()); void gateway?.close(); });
+app.on('before-quit', () => { removeRemoteInfo(remoteInfoPath()); void gateway?.close(); void forwarder?.close(); });

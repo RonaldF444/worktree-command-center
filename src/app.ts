@@ -16,7 +16,7 @@ import { normalizeWorkspaces, addWorkspace, closeWorkspace, nextActiveAfter, typ
 import { THEMES, normalizeTheme, setActiveTheme, activeTerminalPalette } from './terminals/theme-store';
 import { sweepStaleSessions } from './terminals/session-purge';
 import { RemoteTap } from './terminals/remote-tap';
-import { debounceFloor, type FloorState } from './terminals/floor-state';
+import { debounceFloor, toFloorPorts, portsSignature, type FloorState } from './terminals/floor-state';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -248,8 +248,17 @@ async function main(): Promise<void> {
 			repos: activeGrid.repoNames(),
 			theme: themeId,
 			usage: usageWidget?.lastReadout() ?? null,
+			ports: toFloorPorts(activeGrid.portItems()),
 		});
 		floorPublisher = debounceFloor((st) => window.wcc.remoteEvent('floor:state', st), buildFloor);
+		// A new dev-server URL is not a grid change, so nothing else would publish it: poll the
+		// registry like the desktop badge does and push only when the list actually changed.
+		let portsSig = '';
+		const portsPoll = window.setInterval(() => {
+			const sig = portsSignature(toFloorPorts(activeGrid.portItems()));
+			if (sig !== portsSig) { portsSig = sig; floorPublisher.request(); }
+		}, 1500);
+		window.addEventListener('beforeunload', () => window.clearInterval(portsPoll));
 
 		// Terminal-surface visibility, controlled by the overlay (PrivateApi.hideTerminal /
 		// showTerminal). Hiding rides the workspace-switch machinery: the grid unmounts, so
