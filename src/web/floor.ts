@@ -102,6 +102,7 @@ export function mountFloor(root: HTMLElement, bridge: Bridge): () => void {
 			tile.setCentered(id === center);
 		}
 		if (altDown) visible.forEach((id, i) => tiles.get(id)?.setBadge(keyForIndex(i)));
+		if (kaneOpen) kane?.fitToSelf();
 	}
 
 	function applyState(next: FloorState): void {

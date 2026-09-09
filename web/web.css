@@ -4,8 +4,15 @@ html, body { height: 100%; margin: 0; background: var(--background-primary); col
 .wcc-grid-container { flex: 1 1 auto; min-height: 0; padding: 0 12px 12px; }
 .cos-stage-wrap { height: 100%; }
 .cos-terminals-stage { height: 100%; }
-.web-tile-repo { margin-left: 8px; color: var(--text-faint); }
-.web-tile-state { margin-left: 8px; font-size: 10px; text-transform: uppercase; letter-spacing: .4px; color: var(--text-faint); }
+/* Head: one line, never wraps. The name takes the room and ends in an ellipsis; repo/state/buttons
+   keep their size. (Desktop tiles are wide enough not to need this.) */
+.web-tile .cos-term-head { gap: 6px; white-space: nowrap; overflow: hidden; }
+.web-tile .cos-term-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.web-tile-repo { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--text-faint); }
+.web-tile-state { flex: 0 0 auto; font-size: 10px; text-transform: uppercase; letter-spacing: .4px; color: var(--text-faint); }
+.web-tile .cos-term-head-btns { flex: 0 0 auto; }
+/* The Kane tile fills its dock instead of styles.css's fixed 280px tile height. */
+.web-kane > .web-tile { flex: 1 1 auto; min-height: 0; height: auto; }
 .web-tile[data-state="prompt"] .web-tile-state, .web-tile[data-state="menu"] .web-tile-state { color: #e0a92e; }
 .web-tile[data-state="errored"] .web-tile-state { color: #d21e12; }
 .web-tile[data-state="idle"] .web-tile-state { color: #2fae6e; }
