@@ -1,4 +1,5 @@
 import { installDomShim } from './ui/dom-shim';
+import { installWindowDragGuard } from './ui/modifier-drag';
 import { toast } from './ui/toast';
 import { promptForTopic, promptForConfirm } from './ui/prompt-dialog';
 import { TerminalsGrid, type GridDeps, type RepoConfig } from './terminals/terminals-grid';
@@ -54,6 +55,7 @@ let repos: RepoConfig[] = [];
 async function main(): Promise<void> {
 	try {
 		installDomShim();
+		installWindowDragGuard(); // Win+drag = komorebi window move, never a text selection
 
 		const { sidecarDir, userData } = await window.wcc.paths();
 		window.wcc.onRemoteNotice((m) => toast(m));
