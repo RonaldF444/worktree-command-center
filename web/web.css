@@ -23,7 +23,11 @@ html, body { height: 100%; margin: 0; background: var(--background-primary); col
    wide console is no longer cut off. `resize` needs overflow != visible; floor.ts re-fits Kane's
    font on the drag. The body scrolls as a safety net when the console is still wider/taller than
    the dock even at the minimum font. */
-.web-kane { flex: 0 0 auto; width: 420px; min-width: 260px; max-width: 70vw; overflow: hidden; resize: horizontal; }
+/* Left-edge drag grip (floor.ts) resizes the dock — not CSS `resize`, whose grip lands at the
+   bottom-right of a viewport-tall panel and cannot be reached. position:relative anchors the grip. */
+.web-kane { position: relative; flex: 0 0 420px; min-width: 280px; max-width: 70vw; overflow: hidden; }
+.web-kane-grip { position: absolute; left: 0; top: 0; bottom: 0; width: 8px; cursor: ew-resize; z-index: 6; }
+.web-kane-grip:hover, .web-kane-grip.dragging { background: rgba(120,140,255,0.30); }
 /* `scrollbar-gutter: stable` is load-bearing, not cosmetic. Without it the scrollbar's own width
    feeds back into the font fit and the page locks up solid: the font shrinks to fit -> the content
    no longer overflows -> the scrollbar disappears -> the extra width makes the font grow -> it

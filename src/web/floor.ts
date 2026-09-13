@@ -51,6 +51,40 @@ export function mountFloor(root: HTMLElement, bridge: Bridge): () => void {
 	const stage = wrap.createDiv({ cls: 'cos-terminals-stage' });
 	const dock = wrap.createDiv({ cls: 'cos-god-panel web-kane' }); dock.style.display = 'none';
 
+	// Left-edge drag grip to resize the Kane dock — a full-height strip, mirroring the desktop
+	// (god-console.ts). The old approach was CSS `resize: horizontal`, whose grip sits at the
+	// dock's bottom-right corner; on a viewport-tall dock that corner is at the very bottom of the
+	// screen, so the dock could not be narrowed and Kane crushed the stage (cutting the spotlight
+	// terminal in half). Width is persisted and clamped to [280px, 70vw].
+	const GOD_WIDTH_KEY = 'cos-web-god-width';
+	const clampWidth = (w: number): number => Math.min(Math.max(280, Math.round(w)), Math.round(window.innerWidth * 0.7));
+	const applyDockWidth = (w: number): void => { dock.style.flex = `0 0 ${clampWidth(w)}px`; };
+	{
+		const saved = Number(localStorage.getItem(GOD_WIDTH_KEY));
+		if (Number.isFinite(saved) && saved >= 280) applyDockWidth(saved);
+	}
+	const grip = dock.createDiv({ cls: 'web-kane-grip', attr: { title: 'Drag to resize Kane' } });
+	grip.addEventListener('pointerdown', (e: PointerEvent) => {
+		e.preventDefault();
+		const startX = e.clientX;
+		const startW = dock.getBoundingClientRect().width;
+		grip.setPointerCapture(e.pointerId);
+		grip.classList.add('dragging');
+		const move = (ev: PointerEvent): void => { applyDockWidth(startW + (startX - ev.clientX)); kane?.fitToSelf(); };
+		const up = (ev: PointerEvent): void => {
+			grip.classList.remove('dragging');
+			grip.removeEventListener('pointermove', move);
+			grip.removeEventListener('pointerup', up);
+			grip.removeEventListener('pointercancel', up);
+			try { grip.releasePointerCapture(ev.pointerId); } catch { /* already released */ }
+			try { localStorage.setItem(GOD_WIDTH_KEY, String(Math.round(dock.getBoundingClientRect().width))); } catch { /* storage blocked */ }
+			kane?.fitToSelf();
+		};
+		grip.addEventListener('pointermove', move);
+		grip.addEventListener('pointerup', up);
+		grip.addEventListener('pointercancel', up);
+	});
+
 	// --- helpers ---
 	const key = (id: number | 'kane'): string => `${state?.workspaceId ?? ''}:${id}`;
 	const tileDeps = (id: number | 'kane') => ({
