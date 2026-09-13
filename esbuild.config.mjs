@@ -6,7 +6,12 @@ mkdirSync('dist', { recursive: true });
 // xterm's stylesheet → dist for index.html to link
 copyFileSync('node_modules/@xterm/xterm/css/xterm.css', 'dist/xterm.css');
 
-const common = { bundle: true, sourcemap: true, logLevel: 'info' };
+// One build id shared by the desktop renderer and the browser bundle. The desktop stamps it into
+// every floor:state; a browser whose baked-in id differs (it is running a bundle from before the
+// last update) reloads itself to fetch the fresh one. This is what stops a long-open browser tab
+// from silently running stale code after a reinstall.
+const BUILD_ID = String(Date.now());
+const common = { bundle: true, sourcemap: true, logLevel: 'info', define: { __WCC_BUILD__: JSON.stringify(BUILD_ID) } };
 
 // Electron main + preload: real Node processes.
 await esbuild.build({ ...common, entryPoints: ['electron/main.ts'], outfile: 'dist/main.js', platform: 'node', format: 'cjs', external: ['electron', 'node-pty'] });
@@ -26,7 +31,7 @@ await esbuild.build({ ...common, entryPoints: ['src/app.ts'], outfile: 'dist/ren
 // Browser mirror bundle (spec 2026-09-07): a plain-browser build of src/web. platform 'browser'
 // makes any accidental Node import (fs, path, child_process, electron) a hard build error.
 mkdirSync('dist/web', { recursive: true });
-await esbuild.build({ ...common, entryPoints: ['src/web/main.ts'], outfile: 'dist/web/app.js', platform: 'browser', format: 'iife', define: { 'process.env.NODE_ENV': '"production"' } });
+await esbuild.build({ ...common, entryPoints: ['src/web/main.ts'], outfile: 'dist/web/app.js', platform: 'browser', format: 'iife', define: { ...common.define, 'process.env.NODE_ENV': '"production"' } });
 copyFileSync('web/index.html', 'dist/web/index.html');
 copyFileSync('web/web.css', 'dist/web/web.css');
 copyFileSync('app.css', 'dist/web/app.css');

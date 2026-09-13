@@ -97,7 +97,24 @@ async function serveStatic(staticDir: string, req: IncomingMessage, res: ServerR
 			file = join(staticDir, 'index.html');
 		}
 		const data = await readFile(file);
-		res.writeHead(200, { 'Content-Type': MIME[extname(file).toLowerCase()] ?? 'application/octet-stream', ...APP_SHELL_SECURITY_HEADERS });
+		// `no-cache` = revalidate on EVERY load (it does NOT mean "don't store"). Without this the
+		// browser served a stale app.js after an update — the page auto-reconnects its WebSocket
+		// but never reloads, so old JS ran against a new server until a manual hard refresh. A
+		// weak ETag from size+mtime lets the revalidation answer 304 when nothing changed, so this
+		// costs a conditional request, not a full re-download, on an unchanged bundle.
+		const st = await stat(file).catch(() => null);
+		const etag = st ? `W/"${st.size}-${Math.round(st.mtimeMs)}"` : undefined;
+		if (etag && req.headers['if-none-match'] === etag) {
+			res.writeHead(304, { ETag: etag, 'Cache-Control': 'no-cache', ...APP_SHELL_SECURITY_HEADERS });
+			res.end();
+			return;
+		}
+		res.writeHead(200, {
+			'Content-Type': MIME[extname(file).toLowerCase()] ?? 'application/octet-stream',
+			'Cache-Control': 'no-cache',
+			...(etag ? { ETag: etag } : {}),
+			...APP_SHELL_SECURITY_HEADERS,
+		});
 		res.end(data);
 	} catch (err) {
 		console.error('[remote] static serve failed for', req.url, err);

@@ -261,6 +261,7 @@ async function main(): Promise<void> {
 			theme: themeId,
 			usage: usageWidget?.lastReadout() ?? null,
 			ports: toFloorPorts(activeGrid.portItems()),
+			buildId: __WCC_BUILD__,
 		});
 		floorPublisher = debounceFloor((st) => window.wcc.remoteEvent('floor:state', st), buildFloor);
 		// A new dev-server URL is not a grid change, so nothing else would publish it: poll the

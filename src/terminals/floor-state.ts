@@ -24,6 +24,10 @@ export interface FloorState {
 	theme: string;
 	usage: FloorUsage | null;
 	ports: FloorPort[];
+	/** The desktop's build id. A browser whose own baked-in build id differs is running a bundle
+	 *  from before the last update and reloads itself. Optional so an older desktop that doesn't
+	 *  send it never triggers a reload. */
+	buildId?: string;
 }
 
 export function debounceFloor(

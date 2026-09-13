@@ -152,7 +152,26 @@ export function mountFloor(root: HTMLElement, bridge: Bridge): () => void {
 		if (kaneOpen) kane?.fitToSelf();
 	}
 
+	let reloading = false;
 	function applyState(next: FloorState): void {
+		// The server is running a newer build than this page: reload once to fetch it. This is the
+		// safety net for a tab left open across an update — it auto-reconnects its WebSocket but
+		// never reloads on its own, so without this it runs stale JS against a new server (which is
+		// exactly how a shipped browser fix appeared to do nothing). Cache-Control:no-cache on the
+		// gateway makes the reload fetch fresh code, not the cached copy.
+		if (!reloading && next.buildId && next.buildId !== __WCC_BUILD__) {
+			// Reload at most once per distinct server build. If a reload didn't pick up the new
+			// bundle (a proxy still serving stale JS), running stale-but-working beats an infinite
+			// reload loop — so remember which server build we already reloaded for.
+			let already: string | null = null;
+			try { already = sessionStorage.getItem('wcc.reloadedFor'); } catch { /* storage blocked */ }
+			if (already !== next.buildId) {
+				reloading = true;
+				try { sessionStorage.setItem('wcc.reloadedFor', next.buildId); } catch { /* storage blocked */ }
+				try { location.reload(); } catch { /* reload blocked — fall through and run as-is */ reloading = false; }
+				if (reloading) return;
+			}
+		}
 		const prevWs = state?.workspaceId;
 		const prevCenteredId = state?.centeredId ?? null;
 		state = next;
