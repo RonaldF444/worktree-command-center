@@ -38,6 +38,9 @@ export class WebTile {
 	private term: Terminal | null = null;
 	private off: (() => void) | null = null;
 	private centered = false;
+	/** Kane is docked beside the stage, never on it — so he is never `centered`, and every
+	 *  stage-tile interaction that keys off `centered` has to be skipped for him. */
+	private isKane = false;
 
 	constructor(private deps: WebTileDeps) {}
 
@@ -47,9 +50,11 @@ export class WebTile {
 		this.headEl = h;
 		this.repo = head.repo;
 		this.branch = head.branch;
+		this.isKane = head.isKane === true;
 		this.badgeEl = h.createSpan({ cls: 'cos-term-badge' });
-		this.nameEl = h.createSpan({ cls: 'cos-term-name', text: head.name, attr: { title: 'Double-click to rename' } });
-		this.nameEl.addEventListener('dblclick', (e) => { e.stopPropagation(); const n = prompt('Rename terminal', this.nameEl?.textContent ?? ''); if (n && n.trim()) this.deps.onRename(n.trim()); });
+		this.nameEl = h.createSpan({ cls: 'cos-term-name', text: head.name, attr: this.isKane ? {} : { title: 'Double-click to rename' } });
+		// Kane cannot be renamed (his onRename is a no-op), so don't offer a prompt that does nothing.
+		if (!this.isKane) this.nameEl.addEventListener('dblclick', (e) => { e.stopPropagation(); const n = prompt('Rename terminal', this.nameEl?.textContent ?? ''); if (n && n.trim()) this.deps.onRename(n.trim()); });
 		this.repoEl = h.createSpan({ cls: 'web-tile-repo' });
 		this.applyRepoLabel(head.name);
 		this.stateEl = h.createSpan({ cls: 'web-tile-state' });
@@ -58,10 +63,14 @@ export class WebTile {
 		hideBtn.addEventListener('click', (e) => { e.stopPropagation(); this.deps.onHide(); });
 		const killBtn = btns.createEl('button', { text: '×', attr: { title: 'Close — deletes this worktree + its branch' } });
 		killBtn.addEventListener('click', (e) => { e.stopPropagation(); if (confirm(`Close "${this.nameEl?.textContent ?? head.name}"? Deletes its worktree + branch.`)) this.deps.onKill(); });
-		if (head.isKane) btns.style.display = 'none';
-		this.el.addEventListener('click', () => this.deps.onClick());
+		if (this.isKane) btns.style.display = 'none';
+		if (!this.isKane) this.el.addEventListener('click', () => this.deps.onClick());
 		const body = this.el.createDiv({ cls: 'cos-term-body' });
-		body.addEventListener('mousedown', (e) => { if (!this.centered) { e.preventDefault(); e.stopImmediatePropagation(); this.deps.onClick(); } }, true);
+		// Clicking a tile that is NOT the spotlight centres it instead of typing into it. Kane is
+		// docked beside the stage and is never centred, so for him this guard would fire on EVERY
+		// click — cancelling focus and stopping xterm's own mousedown outright, which made him
+		// impossible to click into, focus, or select text in. Stage tiles only.
+		if (!this.isKane) body.addEventListener('mousedown', (e) => { if (!this.centered) { e.preventDefault(); e.stopImmediatePropagation(); this.deps.onClick(); } }, true);
 		this.term = new Terminal({ fontSize: BASE_FONT, convertEol: false, cursorBlink: false, scrollback: 5000, ...activeTerminalFont(), linkHandler: { activate: (e, uri) => { if (e.ctrlKey || e.metaKey) window.open(uri, '_blank', 'noopener'); } } });
 		this.term.open(body);
 		try { const gl = new WebglAddon(); gl.onContextLoss(() => gl.dispose()); this.term.loadAddon(gl); } catch { /* DOM renderer */ }
@@ -136,21 +145,40 @@ export class WebTile {
 		this.fit();
 	}
 
-	/** Snapshot FIRST, then subscribe — nothing missed, nothing doubled. */
+	/** Subscribe FIRST, then snapshot — nothing missed, nothing doubled, and the live feed
+	 *  survives a snapshot that never arrives. Subscribing after the await (as this used to)
+	 *  meant ANY snapshot rejection — a 30s invoke timeout, main's 10s renderer-rpc timeout, or
+	 *  the socket dropping and failing every in-flight invoke — left the tile blank forever with
+	 *  no stream and nothing to retry it. Chunks that land during the round trip are buffered and
+	 *  replayed after the snapshot, so ordering is preserved either way. */
 	async attach(): Promise<void> {
-		const snap = await this.deps.snapshot();
-		// Re-fit once the snapshot has actually rendered. The first fit ran before xterm could
-		// measure its cell (font not laid out yet), so the tile — the spotlight especially — could
-		// be stuck at BASE_FONT in an undersized box, clipping its newest rows with no scrollbar.
-		this.term?.write(snap, () => this.fit());
-		this.off?.();
-		this.off = this.deps.onData((chunk) => this.term?.write(chunk));
+		if (this.off) return; // already attached
+		const early: string[] = [];
+		let painted = false;
+		this.off = this.deps.onData((chunk) => { if (painted) this.term?.write(chunk); else early.push(chunk); });
+		try {
+			const snap = await this.deps.snapshot();
+			// Re-fit once the snapshot has actually rendered. The first fit ran before xterm could
+			// measure its cell (font not laid out yet), so the tile — the spotlight especially — could
+			// be stuck at BASE_FONT in an undersized box, clipping its newest rows with no scrollbar.
+			this.term?.write(snap, () => this.fit());
+		} catch {
+			// No scrollback, but the live stream below still works — far better than a dead tile.
+			this.term?.write('\r\n\x1b[2m— scrollback unavailable; live output follows —\x1b[0m\r\n');
+		}
+		painted = true;
+		for (const c of early.splice(0)) this.term?.write(c);
+		this.fit();
 	}
-	/** Reconnect: replace the whole buffer with a fresh snapshot (the stream may have gaps). */
+	/** Reconnect: replace the whole buffer with a fresh snapshot (the stream may have gaps).
+	 *  Re-subscribes if the subscription was lost, and re-fits like attach() does. */
 	async resume(): Promise<void> {
-		const snap = await this.deps.snapshot();
-		this.term?.reset();
-		this.term?.write(snap);
+		if (!this.off) { await this.attach(); return; }
+		try {
+			const snap = await this.deps.snapshot();
+			this.term?.reset();
+			this.term?.write(snap, () => this.fit());
+		} catch { /* keep what is on screen; the live stream keeps it moving */ }
 	}
 	focus(): void { this.term?.focus(); }
 	blur(): void { this.term?.blur(); }

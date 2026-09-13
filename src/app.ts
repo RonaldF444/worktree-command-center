@@ -236,9 +236,19 @@ async function main(): Promise<void> {
 			activeGrid.unmount();
 			activeId = id;
 			activeGrid = gridFor(id);
-			await activeGrid.mount(gridContainer);
+			// COMMIT the switch before the slow part. mount() restores every session in the target
+			// workspace (git + worktree checks per tile), which takes seconds to minutes on a busy
+			// floor. Refreshing the tab bar and publishing the floor first means the desk AND the
+			// browser show the new workspace immediately instead of looking frozen, and a mount that
+			// throws can no longer leave the app half-switched with a stale tab bar.
 			bar.refresh();
 			persist();
+			floorPublisher.request();
+			try {
+				await activeGrid.mount(gridContainer);
+			} catch (e) {
+				toast(`Workspace "${id}" failed to open: ${(e as Error)?.message ?? e}`);
+			}
 			for (const cb of wsSwitchCbs) { try { cb(id); } catch { /* overlay callback must not break switching */ } }
 			floorPublisher.request();
 		}
@@ -377,12 +387,21 @@ async function main(): Promise<void> {
 					case 'tile:write': return activeGrid.writeToId(p.id, p.data);
 					case 'kane:write': return activeGrid.kaneWrite(p.data);
 					case 'tile:center': activeGrid.centerById(p.id); return true;
+					// Alt+←/→ from the browser: the DESK steps its own spotlight, so the browser can
+					// reach the equal-grid stop and the ring stays identical on both screens.
+					case 'tile:cycle': activeGrid.cycleSpotlight(p.dir); return true;
+					case 'tile:lock': activeGrid.toggleLockById(p.id); return true;
+					case 'kane:open': activeGrid.openKane(); return true;
 					case 'tile:hide': return activeGrid.hideById(p.id);
 					case 'tile:show': return activeGrid.showById(p.id);
 					case 'tile:kill': return activeGrid.closeById(p.id);
 					case 'tile:rename': return activeGrid.renameById(p.id, p.name);
 					case 'tile:spawn': return (await activeGrid.spawnFromName(p.repo, p.base, p.task, p.model ?? undefined, p.effort ?? undefined, p.name ?? undefined)) !== null;
-					case 'workspace:switch': await switchTo(p.id); return true;
+					// Deliberately NOT awaited: switchTo re-mounts a grid, which restores every one of
+					// its sessions — on a busy floor that runs far past the 10s renderer-rpc timeout,
+					// so awaiting it made the browser's switch "fail" while it was in fact working.
+					// The browser learns the switch landed from the floor:state event, not this reply.
+					case 'workspace:switch': void switchTo(p.id); return true;
 					case 'board:get': return activeGrid.boardSummary();
 					default: throw new Error('unknown channel');
 				}

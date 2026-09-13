@@ -172,6 +172,12 @@ export class TerminalsGrid {
 	/** Mount the grid into a page container. Sessions PERSIST across mounts (tab switches):
 	 *  the stage + tiles + sidecar processes are created once and re-attached, never killed. */
 	async mount(parent: HTMLElement): Promise<void> {
+		// FIRST, before any await. unmount() drops the previous grid's key handlers synchronously,
+		// and everything below here is slow (loadRepos, git branch listing, restoring every
+		// session) — installing at the end left Alt+←/→, Alt+K, Alt+L and the F-key jumps dead for
+		// the whole restore, and permanently dead if any of those awaits threw. The handlers read
+		// only optional state (`this.stageEl?`, `this.tiles`), so they are safe this early.
+		this.installKeyboard();
 		await this.loadRepos();
 		const controls = parent.createDiv({ cls: 'cos-terminals-controls' });
 		this.controlsEl = controls;
@@ -290,7 +296,6 @@ export class TerminalsGrid {
 		for (const t of [...this.tiles, ...this.hidden]) if (!t.isJournal) (t as TerminalTile).setDetached(false);
 
 		this.applyMaximizeChrome();
-		this.installKeyboard();
 		window.addEventListener('resize', this.onResize);
 	}
 
@@ -340,7 +345,7 @@ export class TerminalsGrid {
 	 *  spotlight). Independent of the ready stack, so it reaches the equal grid even when every
 	 *  terminal is thinking (the stack is empty then, which is why the old cycle couldn't).
 	 *  Landing on a tile pins it so the auto-decider won't immediately yank it back. */
-	private cycleSpotlight(dir: 1 | -1): void {
+	cycleSpotlight(dir: 1 | -1): void {
 		this.holdUntil = 0; // Alt+←/→ = back in the flow; cycling never pins for long
 		const chatId = this.chatTile?.tileId;
 		const ids = [...this.tiles.map((t) => t.tileId), ...(chatId !== undefined ? [chatId] : [])];
@@ -354,6 +359,10 @@ export class TerminalsGrid {
 	}
 
 	private installKeyboard(): void {
+		// Idempotent: a re-mount without an intervening unmount must not orphan the old handlers
+		// (they could not be removed afterwards, since the fields below are overwritten).
+		if (this.keydown) document.removeEventListener('keydown', this.keydown, true);
+		if (this.keyup) document.removeEventListener('keyup', this.keyup, true);
 		this.keydown = (e: KeyboardEvent) => {
 			if (e.key === 'Alt') { this.stageEl?.toggleClass('alt-on', true); this.refreshBadges(); return; }
 			// NOTE: Escape is deliberately NOT handled here — it must reach the focused
@@ -790,7 +799,7 @@ export class TerminalsGrid {
 	}
 
 	/** Alt+K: open Kane if needed and put the cursor in his terminal. Never closes him. */
-	private openKane(): void {
+	openKane(): void {
 		if (!this.godConsole) { this.toggleGod(); return; } // first open creates + focuses
 		if (!this.godVisible) this.showGod();               // setVisible(true) refits + refocuses
 		this.godConsole.focus();
@@ -1010,7 +1019,8 @@ export class TerminalsGrid {
 	}
 
 	/** Toggle the individual lock for a tile: pin it to center until you switch terminals. */
-	private toggleLockById(id: number): void {
+	/** Alt+L, from the desk or the browser mirror. */
+	toggleLockById(id: number): void {
 		if (!this.tiles.some((t) => t.tileId === id)) return; // only real terminal tiles
 		if (this.lockedTileId === id) { this.lockedTileId = null; this.refreshLockVisuals(); return; }
 		this.lockedTileId = id;

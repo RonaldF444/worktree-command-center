@@ -126,6 +126,24 @@ describe('parseTileInvoke', () => {
 	});
 	it('rejects unknown channels and lists the forwarded set', () => {
 		expect(parseTileInvoke('config:set', {})).toBeNull();
-		expect([...FORWARDED_CHANNELS].sort()).toEqual(['board:get', 'floor:state', 'kane:snapshot', 'kane:write', 'tile:center', 'tile:hide', 'tile:kill', 'tile:rename', 'tile:show', 'tile:snapshot', 'tile:spawn', 'tile:write', 'workspace:switch']);
+		expect([...FORWARDED_CHANNELS].sort()).toEqual(['board:get', 'floor:state', 'kane:open', 'kane:snapshot', 'kane:write', 'tile:center', 'tile:cycle', 'tile:hide', 'tile:kill', 'tile:lock', 'tile:rename', 'tile:show', 'tile:snapshot', 'tile:spawn', 'tile:write', 'workspace:switch']);
+	});
+
+	it('tile:cycle takes a direction of exactly +1 or -1', () => {
+		expect(parseTileInvoke('tile:cycle', { dir: 1 })).toEqual({ channel: 'tile:cycle', dir: 1 });
+		expect(parseTileInvoke('tile:cycle', { dir: -1 })).toEqual({ channel: 'tile:cycle', dir: -1 });
+		for (const bad of [0, 2, -2, '1', 1.5, null, undefined, {}]) expect(parseTileInvoke('tile:cycle', { dir: bad })).toBeNull();
+		expect(parseTileInvoke('tile:cycle', {})).toBeNull();
+	});
+
+	it('tile:lock validates a tile id like the other id channels', () => {
+		expect(parseTileInvoke('tile:lock', { id: 3 })).toEqual({ channel: 'tile:lock', id: 3 });
+		expect(parseTileInvoke('tile:lock', { id: -1 })).toBeNull();
+		expect(parseTileInvoke('tile:lock', {})).toBeNull();
+	});
+
+	it('kane:open needs no payload', () => {
+		expect(parseTileInvoke('kane:open', undefined)).toEqual({ channel: 'kane:open' });
+		expect(parseTileInvoke('kane:open', { nonsense: true })).toEqual({ channel: 'kane:open' });
 	});
 });

@@ -2,7 +2,7 @@ import type { Bridge } from './bridge';
 import { WebTile } from './tile';
 import { diffIds } from './diff';
 import { WebPortsWidget } from './ports';
-import { settledLayout, centeredLayout, keyForIndex, keyToIndex, nextSpotlight } from '../terminals/bubble-layout';
+import { settledLayout, centeredLayout, keyForIndex, keyToIndex } from '../terminals/bubble-layout';
 import { SPAWN_MODELS, SPAWN_EFFORTS } from '../terminals/spawn-options';
 import { normalizeTheme, setActiveTheme, activeTerminalPalette } from '../terminals/theme-store';
 import type { FloorState } from '../terminals/floor-state';
@@ -78,17 +78,27 @@ export function mountFloor(root: HTMLElement, bridge: Bridge): () => void {
 		board.createEl('pre', { cls: 'web-board-reg', text: b.registry });
 	}
 
+	/** Build the Kane tile if the dock is open and the desktop has a Kane to mirror. Safe to call
+	 *  repeatedly: it is also driven from applyState, so a Kane that appears AFTER the dock was
+	 *  opened (or is rebuilt after a workspace switch) fills the dock on its own instead of
+	 *  leaving it blank until the user toggles twice. */
+	function ensureKane(): void {
+		if (!kaneOpen || kane || !state?.kane) return;
+		kane = new WebTile(tileDeps('kane'));
+		kane.render(dock, { name: state.kane.name, repo: 'overseer', branch: '', isKane: true });
+		kane.setSize(state.kane.cols, state.kane.rows);
+		kane.setPalette(activeTerminalPalette());
+		void kane.attach().catch(() => toast('Kane failed to load'));
+	}
+
 	function toggleKane(): void {
 		kaneOpen = !kaneOpen;
 		dock.style.display = kaneOpen ? '' : 'none';
 		kaneBtn.toggleClass('cos-god-on', kaneOpen);
-		if (kaneOpen && !kane && state?.kane) {
-			kane = new WebTile(tileDeps('kane'));
-			kane.render(dock, { name: state.kane.name, repo: 'overseer', branch: '', isKane: true });
-			kane.setSize(state.kane.cols, state.kane.rows);
-			kane.setPalette(activeTerminalPalette());
-			void kane.attach();
-		}
+		// No Kane on the desktop yet: ask for one (the desk's own Alt+K creates him). He arrives
+		// on the next floor:state and ensureKane() fills the dock.
+		if (kaneOpen && !state?.kane) void bridge.invoke('kane:open').catch(() => toast('Could not open Kane'));
+		ensureKane();
 		if (kaneOpen) kane?.focus();
 		layout();
 	}
@@ -112,6 +122,9 @@ export function mountFloor(root: HTMLElement, bridge: Bridge): () => void {
 		const prevWs = state?.workspaceId;
 		const prevCenteredId = state?.centeredId ?? null;
 		state = next;
+		// A workspace switch replaces every session, so the old tiles AND the old Kane go. Kane is
+		// rebuilt below by ensureKane() if the new workspace has one; the dock stays open either
+		// way so the toggle state survives the switch.
 		if (prevWs !== undefined && prevWs !== next.workspaceId) { for (const t of tiles.values()) t.dispose(); tiles.clear(); kane?.dispose(); kane = null; }
 		// theme
 		const themeId = normalizeTheme(next.theme);
@@ -145,7 +158,12 @@ export function mountFloor(root: HTMLElement, bridge: Bridge): () => void {
 		}
 		for (const info of next.terminals) { const t = tiles.get(info.id); if (!t) continue; t.setSize(info.cols, info.rows); t.setHead(info.name, info.state, info.locked); }
 		if (next.kane && kane) kane.setSize(next.kane.cols, next.kane.rows);
-		kaneBtn.disabled = !next.kane;
+		// A Kane created on the desk after the dock was opened — or rebuilt after a workspace
+		// switch disposed the old one — has no other path into the dock.
+		ensureKane();
+		// Never disable the button while the dock is OPEN: that used to strand an empty 420px dock
+		// with no way to close it on any workspace whose grid has no Kane.
+		kaneBtn.disabled = !next.kane && !kaneOpen;
 		layout();
 		if (next.centeredId !== prevCenteredId && next.centeredId !== null) {
 			const ae = document.activeElement;
@@ -166,18 +184,44 @@ export function mountFloor(root: HTMLElement, bridge: Bridge): () => void {
 	window.addEventListener('resize', onResize);
 	// Observe the stage AND the Kane dock: the dock is user-resizable (CSS `resize` in web.css),
 	// and a drag must re-fit Kane's font to the new width so nothing is left clipped.
-	const ro = new ResizeObserver(onResize); ro.observe(stage); ro.observe(dock);
+	//
+	// The callback re-fits fonts, which resizes content INSIDE the observed boxes — so it can feed
+	// itself. web.css kills the known loop (see `scrollbar-gutter`), and this guard is the backstop:
+	// a layout only runs when an observed box's integer size actually changed, so any future
+	// self-feeding style change degrades into one wasted frame instead of a frozen tab.
+	const lastSize = new WeakMap<Element, string>();
+	const ro = new ResizeObserver((entries) => {
+		let changed = false;
+		for (const e of entries) {
+			const size = `${Math.round(e.contentRect.width)}x${Math.round(e.contentRect.height)}`;
+			if (lastSize.get(e.target) !== size) { lastSize.set(e.target, size); changed = true; }
+		}
+		if (changed) layout();
+	});
+	ro.observe(stage); ro.observe(dock);
+
+	/** Every keyboard action is a request to the DESKTOP — it owns the floor, and its reply comes
+	 *  back as a floor:state event. A silent rejection reads as "the keybind is broken", so say so. */
+	const act = (channel: string, payload?: unknown): void => {
+		void bridge.invoke(channel, payload).catch(() => toast(`${channel} failed`));
+	};
 
 	const onKeyDown = (e: KeyboardEvent): void => {
 		if (e.key === 'Alt') { altDown = true; layout(); return; }
 		if (!e.altKey || !state) return;
 		const visible = state.terminals.filter((t) => !t.hidden).map((t) => t.id);
-		if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') { e.preventDefault(); e.stopPropagation(); const want = nextSpotlight(visible, state.centeredId, e.key === 'ArrowRight' ? 1 : -1); if (want !== null) void bridge.invoke('tile:center', { id: want }); return; }
-		if (e.key === 'ArrowUp' || e.key === 'ArrowDown') { e.preventDefault(); e.stopPropagation(); const ws = state.workspaces; if (ws.length < 2) return; const i = Math.max(0, ws.findIndex((w) => w.active)); const n = ws[(i + (e.key === 'ArrowDown' ? 1 : -1) + ws.length) % ws.length]!; void bridge.invoke('workspace:switch', { id: n.id }); return; }
-		if (e.key === 'k' || e.key === 'K') { if (!state.kane) return; e.preventDefault(); e.stopPropagation(); if (!kaneOpen) toggleKane(); else kane?.focus(); return; }
+		// Alt+←/→ asks the DESKTOP to step its own spotlight rather than computing a target here.
+		// Computing it here was broken: nextSpotlight's ring includes a `null` stop (the equal-grid,
+		// no-spotlight position) which this dropped on the floor, so at either end of the ring the
+		// key became a permanent no-op. The desk's ring also includes tiles the browser never sees
+		// (the chat tile) and it applies the right spotlight-hold for a cycle vs a click.
+		if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') { e.preventDefault(); e.stopPropagation(); act('tile:cycle', { dir: e.key === 'ArrowRight' ? 1 : -1 }); return; }
+		if (e.key === 'ArrowUp' || e.key === 'ArrowDown') { e.preventDefault(); e.stopPropagation(); const ws = state.workspaces; if (ws.length < 2) return; const i = Math.max(0, ws.findIndex((w) => w.active)); const n = ws[(i + (e.key === 'ArrowDown' ? 1 : -1) + ws.length) % ws.length]!; act('workspace:switch', { id: n.id }); return; }
+		if (e.key === 'k' || e.key === 'K') { e.preventDefault(); e.stopPropagation(); if (!kaneOpen) toggleKane(); else kane?.focus(); return; }
+		if (e.key === 'l' || e.key === 'L') { e.preventDefault(); e.stopPropagation(); if (state.centeredId !== null) act('tile:lock', { id: state.centeredId }); return; }
 		const norm = e.key.length === 1 ? e.key.toUpperCase() : e.key;
 		const idx = keyToIndex(norm);
-		if (idx !== null && visible[idx] !== undefined) { e.preventDefault(); e.stopPropagation(); void bridge.invoke('tile:center', { id: visible[idx] }); }
+		if (idx !== null && visible[idx] !== undefined) { e.preventDefault(); e.stopPropagation(); act('tile:center', { id: visible[idx] }); }
 	};
 	const onKeyUp = (e: KeyboardEvent): void => { if (e.key === 'Alt') { altDown = false; for (const t of tiles.values()) t.setBadge(null); } };
 	document.addEventListener('keydown', onKeyDown, true);

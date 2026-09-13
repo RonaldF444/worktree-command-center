@@ -68,8 +68,9 @@ export function parseRemoteAction(raw: unknown): RemoteAction | null {
  *  Unlike the phone's `input`, `tile:write` is RAW keystrokes — the browser holds live state from
  *  `floor:state` events (not a 2s poll), so the name-must-match guard is not needed here. */
 export type TileInvoke =
-	| { channel: 'floor:state' } | { channel: 'board:get' } | { channel: 'kane:snapshot' }
-	| { channel: 'tile:snapshot' | 'tile:center' | 'tile:hide' | 'tile:show' | 'tile:kill'; id: number }
+	| { channel: 'floor:state' } | { channel: 'board:get' } | { channel: 'kane:snapshot' } | { channel: 'kane:open' }
+	| { channel: 'tile:snapshot' | 'tile:center' | 'tile:hide' | 'tile:show' | 'tile:kill' | 'tile:lock'; id: number }
+	| { channel: 'tile:cycle'; dir: 1 | -1 }
 	| { channel: 'tile:write'; id: number; data: string }
 	| { channel: 'kane:write'; data: string }
 	| { channel: 'tile:rename'; id: number; name: string }
@@ -77,19 +78,22 @@ export type TileInvoke =
 	| { channel: 'workspace:switch'; id: string };
 
 export const FORWARDED_CHANNELS: ReadonlySet<string> = new Set([
-	'floor:state', 'board:get', 'kane:snapshot', 'tile:snapshot', 'tile:center', 'tile:hide', 'tile:show', 'tile:kill',
-	'tile:write', 'kane:write', 'tile:rename', 'tile:spawn', 'workspace:switch',
+	'floor:state', 'board:get', 'kane:snapshot', 'kane:open', 'tile:snapshot', 'tile:center', 'tile:hide', 'tile:show', 'tile:kill',
+	'tile:lock', 'tile:cycle', 'tile:write', 'kane:write', 'tile:rename', 'tile:spawn', 'workspace:switch',
 ]);
 export const MAX_WRITE = 65536;
 export const MAX_NAME = 80;
 
-const ID_CHANNELS = new Set(['tile:snapshot', 'tile:center', 'tile:hide', 'tile:show', 'tile:kill']);
+const ID_CHANNELS = new Set(['tile:snapshot', 'tile:center', 'tile:hide', 'tile:show', 'tile:kill', 'tile:lock']);
 const optStr = (v: unknown, max = 200): string | null => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : null);
 
 export function parseTileInvoke(channel: string, payload: unknown): TileInvoke | null {
-	if (channel === 'floor:state' || channel === 'board:get' || channel === 'kane:snapshot') return { channel };
+	if (channel === 'floor:state' || channel === 'board:get' || channel === 'kane:snapshot' || channel === 'kane:open') return { channel };
 	const p = (payload && typeof payload === 'object' ? payload : {}) as Record<string, unknown>;
 	if (ID_CHANNELS.has(channel)) return isTileId(p.id) ? { channel: channel as 'tile:snapshot', id: p.id } : null;
+	// Alt+←/→ in the browser: a DIRECTION, not a target. The desk owns the ring (it includes the
+	// equal-grid stop and tiles the browser cannot see), so only ±1 is accepted here.
+	if (channel === 'tile:cycle') return p.dir === 1 || p.dir === -1 ? { channel, dir: p.dir } : null;
 	if (channel === 'tile:write') {
 		if (!isTileId(p.id) || typeof p.data !== 'string' || !p.data || p.data.length > MAX_WRITE) return null;
 		return { channel, id: p.id, data: p.data };
