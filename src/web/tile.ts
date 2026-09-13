@@ -139,7 +139,10 @@ export class WebTile {
 	/** Snapshot FIRST, then subscribe — nothing missed, nothing doubled. */
 	async attach(): Promise<void> {
 		const snap = await this.deps.snapshot();
-		this.term?.write(snap);
+		// Re-fit once the snapshot has actually rendered. The first fit ran before xterm could
+		// measure its cell (font not laid out yet), so the tile — the spotlight especially — could
+		// be stuck at BASE_FONT in an undersized box, clipping its newest rows with no scrollbar.
+		this.term?.write(snap, () => this.fit());
 		this.off?.();
 		this.off = this.deps.onData((chunk) => this.term?.write(chunk));
 	}

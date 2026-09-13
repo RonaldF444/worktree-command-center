@@ -19,7 +19,15 @@ html, body { height: 100%; margin: 0; background: var(--background-primary); col
 .web-tile .cos-term-name { cursor: pointer; }
 .web-tile .cos-term-head-btns button { padding: 2px 7px; font-size: 12px; }
 .web-task { flex: 1 1 240px; background: var(--background-primary); color: var(--text-normal); border: 1px solid var(--background-modifier-border); border-radius: 6px; padding: 4px 8px; }
-.web-kane { flex: 0 0 380px; }
+/* Kane dock: user-resizable width (drag the bottom-right grip) instead of a frozen 380px, so a
+   wide console is no longer cut off. `resize` needs overflow != visible; floor.ts re-fits Kane's
+   font on the drag. The body scrolls as a safety net when the console is still wider/taller than
+   the dock even at the minimum font. */
+.web-kane { flex: 0 0 auto; width: 420px; min-width: 260px; max-width: 70vw; overflow: hidden; resize: horizontal; }
+.web-kane .cos-term-body { overflow: auto; }
+/* The spotlight is top-anchored, so when its output is taller than the box the NEWEST lines fall
+   below the clip with no scrollbar. Let the centred tile's body scroll so the bottom is reachable. */
+.web-tile.centered .cos-term-body { overflow: auto; }
 .web-board { max-height: 30vh; overflow: auto; background: var(--background-secondary); border: 1px solid var(--background-modifier-border); border-radius: 8px; padding: 8px 12px; margin-bottom: 10px; font-size: 12px; }
 .web-board-h { font-weight: 600; margin-bottom: 4px; }
 .web-board-row { display: flex; gap: 8px; align-items: center; padding: 2px 0; }

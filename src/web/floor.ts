@@ -164,7 +164,9 @@ export function mountFloor(root: HTMLElement, bridge: Bridge): () => void {
 	void bridge.invoke<FloorState>('floor:state').then(applyState).catch(() => toast('Could not load the floor'));
 	const onResize = (): void => layout();
 	window.addEventListener('resize', onResize);
-	const ro = new ResizeObserver(onResize); ro.observe(stage);
+	// Observe the stage AND the Kane dock: the dock is user-resizable (CSS `resize` in web.css),
+	// and a drag must re-fit Kane's font to the new width so nothing is left clipped.
+	const ro = new ResizeObserver(onResize); ro.observe(stage); ro.observe(dock);
 
 	const onKeyDown = (e: KeyboardEvent): void => {
 		if (e.key === 'Alt') { altDown = true; layout(); return; }
