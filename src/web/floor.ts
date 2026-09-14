@@ -100,6 +100,13 @@ export function mountFloor(root: HTMLElement, bridge: Bridge): () => void {
 		onKill: () => { if (id !== 'kane') void bridge.invoke('tile:kill', { id }); },
 		// Fill mode (Kane + the spotlight tile): this browser's geometry becomes the PTY's shape.
 		resize: (cols: number, rows: number) => { void bridge.invoke(id === 'kane' ? 'kane:resize' : 'tile:resize', id === 'kane' ? { cols, rows } : { id, cols, rows }).catch(() => {}); },
+		// Pasted image: the bytes go to the host, which saves them and types the path into the
+		// session (claude reads images by path, and it runs there, not here).
+		pasteImage: (data: string, mime: string) => {
+			void bridge.invoke(id === 'kane' ? 'kane:image' : 'tile:image', id === 'kane' ? { data, mime } : { id, data, mime })
+				.then((ok) => { if (ok === false) toast('Could not paste the image'); })
+				.catch(() => toast('Could not paste the image'));
+		},
 	});
 
 	async function refreshBoard(): Promise<void> {

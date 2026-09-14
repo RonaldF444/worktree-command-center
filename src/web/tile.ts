@@ -25,7 +25,12 @@ export interface WebTileDeps {
 	onKill: () => void;
 	/** Fill mode only: push the browser-chosen PTY shape to the desktop (kane:/tile:resize). */
 	resize?: (cols: number, rows: number) => void;
+	/** Ship a pasted image to the host, which saves it and types its path into the session. */
+	pasteImage?: (dataBase64: string, mime: string) => void;
 }
+
+/** Image types we forward on paste — must match PASTE_MIMES in electron/remote-actions.ts. */
+const PASTE_MIMES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
 
 /** One mirrored terminal, in one of two modes.
  *  PREVIEW (default): the xterm keeps the DESKTOP's PTY size (setSize) and the FONT shrinks to
@@ -107,6 +112,31 @@ export class WebTile {
 			return true;
 		});
 		this.term.onData((d) => this.deps.write(d)); // everything forwarded, like the desktop (focus/DSR replies included)
+		// A real paste event is the ONLY place the clipboard's IMAGE is reachable: the Ctrl+V key
+		// handler above can read text via navigator.clipboard, but reading an image that way needs
+		// a permission the browser will not grant for a keystroke. Images go to the host (which is
+		// where claude runs); text falls through to xterm's own paste.
+		body.addEventListener('paste', (e: ClipboardEvent) => {
+			const items = e.clipboardData?.items;
+			if (!items || !this.deps.pasteImage) return;
+			for (const it of Array.from(items)) {
+				if (it.kind !== 'file' || !PASTE_MIMES.has(it.type)) continue;
+				const file = it.getAsFile();
+				if (!file) continue;
+				e.preventDefault();
+				e.stopImmediatePropagation();
+				const mime = it.type;
+				void file.arrayBuffer().then((buf) => {
+					// btoa needs a binary string; chunk it so a multi-MB image can't blow the
+					// argument limit of String.fromCharCode.
+					const bytes = new Uint8Array(buf);
+					let bin = '';
+					for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+					this.deps.pasteImage?.(btoa(bin), mime);
+				}).catch(() => { /* unreadable clipboard file — nothing to send */ });
+				return;
+			}
+		}, true);
 	}
 
 	setRect(r: { x: number; y: number; w: number; h: number }): void {

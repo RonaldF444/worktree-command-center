@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { parseRemoteAction, MAX_INPUT, KANE_ID } from '../electron/remote-actions';
-import { parseTileInvoke, FORWARDED_CHANNELS, MAX_WRITE } from '../electron/remote-actions';
+import { parseTileInvoke, FORWARDED_CHANNELS, MAX_WRITE, MAX_PASTE_B64 } from '../electron/remote-actions';
 
 describe('parseRemoteAction — mirror actions (center / workspace)', () => {
 	it('accepts centering a real tile', () => {
@@ -126,7 +126,7 @@ describe('parseTileInvoke', () => {
 	});
 	it('rejects unknown channels and lists the forwarded set', () => {
 		expect(parseTileInvoke('config:set', {})).toBeNull();
-		expect([...FORWARDED_CHANNELS].sort()).toEqual(['board:get', 'floor:state', 'kane:open', 'kane:resize', 'kane:snapshot', 'kane:write', 'tile:center', 'tile:cycle', 'tile:hide', 'tile:kill', 'tile:lock', 'tile:release', 'tile:rename', 'tile:resize', 'tile:show', 'tile:snapshot', 'tile:spawn', 'tile:write', 'workspace:switch']);
+		expect([...FORWARDED_CHANNELS].sort()).toEqual(['board:get', 'floor:state', 'kane:image', 'kane:open', 'kane:resize', 'kane:snapshot', 'kane:write', 'tile:center', 'tile:cycle', 'tile:hide', 'tile:image', 'tile:kill', 'tile:lock', 'tile:release', 'tile:rename', 'tile:resize', 'tile:show', 'tile:snapshot', 'tile:spawn', 'tile:write', 'workspace:switch']);
 	});
 
 	it('kane:resize and tile:resize validate integer dims within the accepted window', () => {
@@ -143,6 +143,22 @@ describe('parseTileInvoke', () => {
 	it('tile:release validates a tile id like the other id channels', () => {
 		expect(parseTileInvoke('tile:release', { id: 5 })).toEqual({ channel: 'tile:release', id: 5 });
 		expect(parseTileInvoke('tile:release', {})).toBeNull();
+	});
+
+	it('image paste takes strict base64 and a whitelisted mime only', () => {
+		const data = 'aGVsbG8=';
+		expect(parseTileInvoke('kane:image', { data, mime: 'image/png' })).toEqual({ channel: 'kane:image', data, mime: 'image/png' });
+		expect(parseTileInvoke('tile:image', { id: 2, data, mime: 'image/jpeg' })).toEqual({ channel: 'tile:image', id: 2, data, mime: 'image/jpeg' });
+		// A mime outside the whitelist would pick the file extension written to disk — reject it.
+		for (const mime of ['image/svg+xml', 'text/html', 'application/octet-stream', '', 'png']) {
+			expect(parseTileInvoke('kane:image', { data, mime })).toBeNull();
+		}
+		// Non-base64 payloads (path traversal, data: URLs, whitespace) never reach the writer.
+		for (const bad of ['../../evil', 'data:image/png;base64,AAAA', 'a b', '', 'aGVsbG8==='] ) {
+			expect(parseTileInvoke('kane:image', { data: bad, mime: 'image/png' })).toBeNull();
+		}
+		expect(parseTileInvoke('kane:image', { data: 'A'.repeat(MAX_PASTE_B64 + 4), mime: 'image/png' })).toBeNull();
+		expect(parseTileInvoke('tile:image', { data, mime: 'image/png' })).toBeNull(); // missing id
 	});
 
 	it('tile:cycle takes a direction of exactly +1 or -1', () => {

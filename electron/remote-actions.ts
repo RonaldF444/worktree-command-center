@@ -73,6 +73,8 @@ export type TileInvoke =
 	| { channel: 'tile:cycle'; dir: 1 | -1 }
 	| { channel: 'kane:resize'; cols: number; rows: number }
 	| { channel: 'tile:resize'; id: number; cols: number; rows: number }
+	| { channel: 'kane:image'; data: string; mime: PasteMime }
+	| { channel: 'tile:image'; id: number; data: string; mime: PasteMime }
 	| { channel: 'tile:write'; id: number; data: string }
 	| { channel: 'kane:write'; data: string }
 	| { channel: 'tile:rename'; id: number; name: string }
@@ -82,8 +84,19 @@ export type TileInvoke =
 export const FORWARDED_CHANNELS: ReadonlySet<string> = new Set([
 	'floor:state', 'board:get', 'kane:snapshot', 'kane:open', 'tile:snapshot', 'tile:center', 'tile:hide', 'tile:show', 'tile:kill',
 	'tile:lock', 'tile:cycle', 'tile:write', 'kane:write', 'tile:rename', 'tile:spawn', 'workspace:switch',
-	'kane:resize', 'tile:resize', 'tile:release',
+	'kane:resize', 'tile:resize', 'tile:release', 'kane:image', 'tile:image',
 ]);
+
+/** Image types a remote may paste into a session. Whitelisted, not sniffed: the payload is
+ *  written to a file on THIS machine, so the extension must come from a fixed set and never
+ *  from anything the caller supplies. */
+export const PASTE_MIMES = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp' } as const;
+export type PasteMime = keyof typeof PASTE_MIMES;
+/** Base64 cap (~9MB decoded) — well under the 16MB WebSocket frame limit. */
+export const MAX_PASTE_B64 = 12 * 1024 * 1024;
+const isB64 = (v: unknown): v is string =>
+	typeof v === 'string' && v.length > 0 && v.length <= MAX_PASTE_B64 && /^[A-Za-z0-9+/]+={0,2}$/.test(v);
+const isMime = (v: unknown): v is PasteMime => typeof v === 'string' && Object.prototype.hasOwnProperty.call(PASTE_MIMES, v);
 
 /** PTY dims a remote may request. Wide enough for any real screen, tight enough that a hostile
  *  body can't wedge ConPTY with a degenerate or enormous grid. */
@@ -110,6 +123,14 @@ export function parseTileInvoke(channel: string, payload: unknown): TileInvoke |
 	if (channel === 'tile:resize') {
 		if (!isTileId(p.id) || !isSize(p)) return null;
 		return { channel, id: p.id, cols: p.cols as number, rows: p.rows as number };
+	}
+	// Pasted image: the browser's clipboard lives on the REMOTE device, but claude runs here, so
+	// the bytes travel and get written to a scratch file on this machine whose path is typed into
+	// the session. Strict base64 + a whitelisted mime; the filename is generated, never supplied.
+	if (channel === 'kane:image') return isB64(p.data) && isMime(p.mime) ? { channel, data: p.data, mime: p.mime } : null;
+	if (channel === 'tile:image') {
+		if (!isTileId(p.id) || !isB64(p.data) || !isMime(p.mime)) return null;
+		return { channel, id: p.id, data: p.data, mime: p.mime };
 	}
 	if (channel === 'tile:write') {
 		if (!isTileId(p.id) || typeof p.data !== 'string' || !p.data || p.data.length > MAX_WRITE) return null;

@@ -21,7 +21,36 @@ import { debounceFloor, toFloorPorts, portsSignature, type FloorState } from './
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
+import { PASTE_MIMES, type PasteMime } from '../electron/remote-actions';
 import { registerPrivateFeatures } from 'wcc-private';
+
+/** Scratch dir for images pasted from a remote browser. os.tmpdir() deliberately — userData is
+ *  "…\Worktree Command Center", and a path with spaces typed into a prompt needs quoting that
+ *  claude's file detection does not reliably survive. */
+const PASTE_DIR = path.join(os.tmpdir(), 'wcc-paste');
+const PASTE_TTL_MS = 24 * 60 * 60 * 1000;
+
+/** Write a remote-pasted image here and return the path to type into the session ('' on failure).
+ *  The caller has already validated the base64 and the mime against a whitelist; the filename is
+ *  generated, never taken from the remote. Files older than a day are pruned opportunistically. */
+function savePastedImage(dataB64: string, mime: PasteMime): string {
+	try {
+		fs.mkdirSync(PASTE_DIR, { recursive: true });
+		try {
+			const now = Date.now();
+			for (const f of fs.readdirSync(PASTE_DIR)) {
+				const full = path.join(PASTE_DIR, f);
+				if (now - fs.statSync(full).mtimeMs > PASTE_TTL_MS) fs.unlinkSync(full);
+			}
+		} catch { /* pruning is best-effort — never block a paste */ }
+		const file = path.join(PASTE_DIR, `paste-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${PASTE_MIMES[mime]}`);
+		fs.writeFileSync(file, Buffer.from(dataB64, 'base64'));
+		return file;
+	} catch (e) {
+		console.error('[remote] could not save pasted image:', e);
+		return '';
+	}
+}
 import type { SessionEnvProvider } from './private-api';
 
 declare global {
@@ -403,6 +432,10 @@ async function main(): Promise<void> {
 					case 'kane:resize': return activeGrid.kaneResize(p.cols, p.rows);
 					case 'tile:resize': return activeGrid.tileResize(p.id, p.cols, p.rows);
 					case 'tile:release': return activeGrid.tileRelease(p.id);
+					// A remote pasted an image: save it here (claude runs on THIS machine and reads
+					// images by path) and type the path into the session for the user to caption.
+					case 'kane:image': { const f = savePastedImage(p.data, p.mime); return f ? activeGrid.kaneWrite(f) : false; }
+					case 'tile:image': { const f = savePastedImage(p.data, p.mime); return f ? activeGrid.writeToId(p.id, f) : false; }
 					case 'tile:hide': return activeGrid.hideById(p.id);
 					case 'tile:show': return activeGrid.showById(p.id);
 					case 'tile:kill': return activeGrid.closeById(p.id);
