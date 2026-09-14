@@ -127,7 +127,12 @@ async function main(): Promise<void> {
 
 		// Browser mirror (spec 2026-09-07): one tap for every workspace; keys are `${wsId}:${tileId}`.
 		const tap = new RemoteTap({ emit: (channel, payload) => window.wcc.remoteEvent(channel, payload) });
-		window.wcc.onRemoteClients((n) => tap.setClientCount(n));
+		window.wcc.onRemoteClients((n) => {
+			tap.setClientCount(n);
+			// Last browser gone: every remote-shaped PTY (Kane, spotlight tiles) goes back to the
+			// desk's own geometry, in every workspace.
+			if (n === 0) for (const g of grids.values()) g.releaseRemoteSizes();
+		});
 		const tapKey = (ws: string, id: number | 'kane'): string => `${ws}:${id}`;
 
 		// Session-env provider (see docs/superpowers/specs/2026-07-13-session-env-provider-design.md).
@@ -393,6 +398,11 @@ async function main(): Promise<void> {
 					case 'tile:cycle': activeGrid.cycleSpotlight(p.dir); return true;
 					case 'tile:lock': activeGrid.toggleLockById(p.id); return true;
 					case 'kane:open': activeGrid.openKane(); return true;
+					// Remote-driven PTY shape: the browser's screen wins for Kane + its spotlight
+					// tile while it is connected (see resizeTo in god-console / terminal-tile).
+					case 'kane:resize': return activeGrid.kaneResize(p.cols, p.rows);
+					case 'tile:resize': return activeGrid.tileResize(p.id, p.cols, p.rows);
+					case 'tile:release': return activeGrid.tileRelease(p.id);
 					case 'tile:hide': return activeGrid.hideById(p.id);
 					case 'tile:show': return activeGrid.showById(p.id);
 					case 'tile:kill': return activeGrid.closeById(p.id);

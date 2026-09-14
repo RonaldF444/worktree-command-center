@@ -209,7 +209,9 @@ export class TerminalTile implements StageTile {
 			// So satellites/uncentered tiles keep their size (no resize, no re-emit); the centered
 			// tile fits once (deduped), re-fitting only if the centered size truly changes (window
 			// resize / satellite count). Clamp to ≥80 cols so output is never wrapped tiny.
-			propose: () => (this.centered ? this.fit?.proposeDimensions() ?? null : null),
+			// While a BROWSER owns the size (remoteSized, set by tile:resize), propose nothing —
+			// the remote's geometry wins until tile:release / disconnect.
+			propose: () => (this.centered && !this.remoteSized ? this.fit?.proposeDimensions() ?? null : null),
 			apply: (cols, rows) => { this.term?.resize(cols, rows); this.bridge?.resize(cols, rows); },
 			minCols: 80,
 			minRows: 20,
@@ -551,6 +553,25 @@ export class TerminalTile implements StageTile {
 	/** Coalesce resize bursts into a single fit + pty-resize (see FitThrottle). */
 	private fitSoon(): void {
 		this.fitThrottle?.schedule();
+	}
+
+	/** True while a connected browser drives this tile's PTY shape (tile:resize). Gates the
+	 *  FitThrottle propose above so the desk's geometry can't clobber the remote's. */
+	private remoteSized = false;
+
+	/** Browser mirror: reshape the PTY to the remote's geometry (its spotlight box at a readable
+	 *  font). The desk view shows the same grid, possibly clipped, until release. */
+	resizeTo(cols: number, rows: number): void {
+		this.remoteSized = true;
+		this.term?.resize(cols, rows);
+		this.bridge?.resize(cols, rows);
+	}
+
+	/** The browser un-spotlighted this tile (or disconnected): the desk owns the size again. */
+	releaseRemoteSize(): void {
+		if (!this.remoteSized) return;
+		this.remoteSized = false;
+		this.fitSoon();
 	}
 
 	/** Tear down the session + DOM WITHOUT touching the worktree (used on page switch). */

@@ -126,7 +126,23 @@ describe('parseTileInvoke', () => {
 	});
 	it('rejects unknown channels and lists the forwarded set', () => {
 		expect(parseTileInvoke('config:set', {})).toBeNull();
-		expect([...FORWARDED_CHANNELS].sort()).toEqual(['board:get', 'floor:state', 'kane:open', 'kane:snapshot', 'kane:write', 'tile:center', 'tile:cycle', 'tile:hide', 'tile:kill', 'tile:lock', 'tile:rename', 'tile:show', 'tile:snapshot', 'tile:spawn', 'tile:write', 'workspace:switch']);
+		expect([...FORWARDED_CHANNELS].sort()).toEqual(['board:get', 'floor:state', 'kane:open', 'kane:resize', 'kane:snapshot', 'kane:write', 'tile:center', 'tile:cycle', 'tile:hide', 'tile:kill', 'tile:lock', 'tile:release', 'tile:rename', 'tile:resize', 'tile:show', 'tile:snapshot', 'tile:spawn', 'tile:write', 'workspace:switch']);
+	});
+
+	it('kane:resize and tile:resize validate integer dims within the accepted window', () => {
+		expect(parseTileInvoke('kane:resize', { cols: 56, rows: 92 })).toEqual({ channel: 'kane:resize', cols: 56, rows: 92 });
+		expect(parseTileInvoke('tile:resize', { id: 3, cols: 80, rows: 40 })).toEqual({ channel: 'tile:resize', id: 3, cols: 80, rows: 40 });
+		// Below/above bounds, non-integers, wrong types, missing id — all rejected.
+		for (const bad of [{ cols: 19, rows: 40 }, { cols: 401, rows: 40 }, { cols: 80, rows: 4 }, { cols: 80, rows: 201 }, { cols: 80.5, rows: 40 }, { cols: '80', rows: 40 }, { rows: 40 }, {}]) {
+			expect(parseTileInvoke('kane:resize', bad)).toBeNull();
+		}
+		expect(parseTileInvoke('tile:resize', { cols: 80, rows: 40 })).toBeNull();
+		expect(parseTileInvoke('tile:resize', { id: -1, cols: 80, rows: 40 })).toBeNull();
+	});
+
+	it('tile:release validates a tile id like the other id channels', () => {
+		expect(parseTileInvoke('tile:release', { id: 5 })).toEqual({ channel: 'tile:release', id: 5 });
+		expect(parseTileInvoke('tile:release', {})).toBeNull();
 	});
 
 	it('tile:cycle takes a direction of exactly +1 or -1', () => {

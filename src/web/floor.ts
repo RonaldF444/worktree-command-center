@@ -19,6 +19,8 @@ export function mountFloor(root: HTMLElement, bridge: Bridge): () => void {
 	let kane: WebTile | null = null;
 	let kaneOpen = false;
 	let altDown = false;
+	/** Tile currently in FILL mode (the spotlight) — its PTY carries this browser's shape. */
+	let filledId: number | null = null;
 
 	// --- chrome ---
 	const top = root.createDiv({ cls: 'wcc-topbar' });
@@ -96,6 +98,8 @@ export function mountFloor(root: HTMLElement, bridge: Bridge): () => void {
 		onRename: (name: string) => { if (id !== 'kane') void bridge.invoke('tile:rename', { id, name }); },
 		onHide: () => { if (id !== 'kane') void bridge.invoke('tile:hide', { id }); },
 		onKill: () => { if (id !== 'kane') void bridge.invoke('tile:kill', { id }); },
+		// Fill mode (Kane + the spotlight tile): this browser's geometry becomes the PTY's shape.
+		resize: (cols: number, rows: number) => { void bridge.invoke(id === 'kane' ? 'kane:resize' : 'tile:resize', id === 'kane' ? { cols, rows } : { id, cols, rows }).catch(() => {}); },
 	});
 
 	async function refreshBoard(): Promise<void> {
@@ -122,6 +126,9 @@ export function mountFloor(root: HTMLElement, bridge: Bridge): () => void {
 		kane.render(dock, { name: state.kane.name, repo: 'overseer', branch: '', isKane: true });
 		kane.setSize(state.kane.cols, state.kane.rows);
 		kane.setPalette(activeTerminalPalette());
+		// Kane is a console the user READS: fill the dock at a readable font and reshape his PTY
+		// to it, instead of shrinking 100+ desktop columns into an unreadable strip at the top.
+		kane.setFill(true);
 		void kane.attach().catch(() => toast('Kane failed to load'));
 	}
 
@@ -211,6 +218,18 @@ export function mountFloor(root: HTMLElement, bridge: Bridge): () => void {
 		}
 		for (const info of next.terminals) { const t = tiles.get(info.id); if (!t) continue; t.setSize(info.cols, info.rows); t.setHead(info.name, info.state, info.locked); }
 		if (next.kane && kane) kane.setSize(next.kane.cols, next.kane.rows);
+		// The SPOTLIGHT tile is the one being read: it fills its box at a readable font and its
+		// PTY takes this browser's shape (fill mode). When the spotlight moves, the old tile hands
+		// the size back to the desk (tile:release) and becomes a shrunk preview again.
+		if (filledId !== next.centeredId) {
+			const old = filledId !== null ? tiles.get(filledId) : null;
+			if (old) old.setFill(false);
+			if (filledId !== null && old) void bridge.invoke('tile:release', { id: filledId }).catch(() => {});
+			filledId = next.centeredId;
+			if (filledId !== null) tiles.get(filledId)?.setFill(true);
+		} else if (filledId !== null) {
+			tiles.get(filledId)?.setFill(true); // tile may have just been (re)created this pass
+		}
 		// A Kane created on the desk after the dock was opened — or rebuilt after a workspace
 		// switch disposed the old one — has no other path into the dock.
 		ensureKane();

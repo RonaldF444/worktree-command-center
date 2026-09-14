@@ -739,6 +739,15 @@ export class TerminalsGrid {
 	}
 	writeToId(id: number, data: string): boolean { const t = this.terminalById(id); if (!t) return false; t.sendKeys(data); return true; }
 	kaneWrite(data: string): boolean { if (!this.godConsole) return false; this.godConsole.write(data); return true; }
+	/** Browser mirror: the remote reshapes Kane / the spotlight tile to ITS screen; the desk's own
+	 *  fit yields until the matching release (or every remote disconnecting). */
+	kaneResize(cols: number, rows: number): boolean { if (!this.godConsole) return false; this.godConsole.resizeTo(cols, rows); this.deps.onFloorChange?.(); return true; }
+	tileResize(id: number, cols: number, rows: number): boolean { const t = this.terminalById(id); if (!t) return false; t.resizeTo(cols, rows); this.deps.onFloorChange?.(); return true; }
+	tileRelease(id: number): boolean { const t = this.terminalById(id); if (!t) return false; t.releaseRemoteSize(); return true; }
+	releaseRemoteSizes(): void {
+		for (const t of [...this.tiles, ...this.hidden]) if (!t.isJournal) (t as TerminalTile).releaseRemoteSize();
+		this.godConsole?.releaseRemoteSize();
+	}
 	renameById(id: number, name: string): boolean { const t = this.terminalById(id); if (!t) return false; t.setName(name); return true; }
 	hideById(id: number): boolean { const t = this.tiles.find((x) => x.tileId === id); if (!t) return false; this.hideTile(t); return true; }
 	showById(id: number): boolean { if (!this.hidden.some((t) => t.tileId === id)) return false; this.showTile(id); return true; }

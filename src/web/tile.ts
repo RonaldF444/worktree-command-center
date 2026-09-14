@@ -1,4 +1,5 @@
 import { Terminal } from '@xterm/xterm';
+import { FitAddon } from '@xterm/addon-fit';
 import { WebglAddon } from '@xterm/addon-webgl';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { scrollIntentForKey } from '../terminals/scroll-keys';
@@ -6,7 +7,12 @@ import { activeTerminalFont } from '../terminals/theme-store';
 import { fitFontSize, repoLabel } from './fit';
 
 const BASE_FONT = 12;
-const MIN_FONT = 6;
+// Preview floor. 4px is unreadable on purpose: side tiles are previews, and a smaller floor means
+// they shrink further instead of CLIPPING their right edge when the box gets tight.
+const MIN_FONT = 4;
+// Bounds mirroring electron/remote-actions.ts — a fill-mode grid never leaves this window.
+const MIN_COLS = 20, MAX_COLS = 400, MIN_ROWS = 5, MAX_ROWS = 200;
+const RESIZE_SEND_MS = 200;
 
 export interface WebTileDeps {
 	key: string;
@@ -17,11 +23,18 @@ export interface WebTileDeps {
 	onRename: (name: string) => void;
 	onHide: () => void;
 	onKill: () => void;
+	/** Fill mode only: push the browser-chosen PTY shape to the desktop (kane:/tile:resize). */
+	resize?: (cols: number, rows: number) => void;
 }
 
-/** One mirrored terminal. The xterm keeps the DESKTOP's PTY size (setSize) — the browser never
- *  resizes the PTY, so the two screens cannot fight. To fit the tile box the FONT shrinks instead
- *  (see fit.ts), down to MIN_FONT; past that it clips bottom-right like the desktop. */
+/** One mirrored terminal, in one of two modes.
+ *  PREVIEW (default): the xterm keeps the DESKTOP's PTY size (setSize) and the FONT shrinks to
+ *  fit the box (fit.ts), down to MIN_FONT — the two screens cannot fight over the size.
+ *  FILL (Kane + the spotlight tile, while this browser drives): the font is fixed at BASE_FONT
+ *  and the GRID is computed from the box instead, pushed to the desktop via deps.resize — a
+ *  wide-short desktop grid can never fill a tall-narrow browser box at a readable font, so for
+ *  the terminals the user is actually reading, the browser's geometry wins. The desktop
+ *  suppresses its own fit for those PTYs until release/disconnect. */
 export class WebTile {
 	private el: HTMLElement | null = null;
 	private nameEl: HTMLElement | null = null;
@@ -41,6 +54,14 @@ export class WebTile {
 	/** Kane is docked beside the stage, never on it — so he is never `centered`, and every
 	 *  stage-tile interaction that keys off `centered` has to be skipped for him. */
 	private isKane = false;
+	private fillMode = false;
+	private sendTimer: ReturnType<typeof setTimeout> | null = null;
+	private lastSent: { cols: number; rows: number } | null = null;
+	/** Fill mode uses xterm's OWN measurer for the grid. Hand-computing it from a scaled cell
+	 *  underestimated the character height and produced ~92 rows inside a 252px box (the terminal
+	 *  overflowed its tile). proposeDimensions() measures the live element the same way the
+	 *  desktop's FitThrottle does. */
+	private fitAddon: FitAddon | null = null;
 
 	constructor(private deps: WebTileDeps) {}
 
@@ -73,6 +94,8 @@ export class WebTile {
 		if (!this.isKane) body.addEventListener('mousedown', (e) => { if (!this.centered) { e.preventDefault(); e.stopImmediatePropagation(); this.deps.onClick(); } }, true);
 		this.term = new Terminal({ fontSize: BASE_FONT, convertEol: false, cursorBlink: false, scrollback: 5000, ...activeTerminalFont(), linkHandler: { activate: (e, uri) => { if (e.ctrlKey || e.metaKey) window.open(uri, '_blank', 'noopener'); } } });
 		this.term.open(body);
+		this.fitAddon = new FitAddon();
+		this.term.loadAddon(this.fitAddon);
 		try { const gl = new WebglAddon(); gl.onContextLoss(() => gl.dispose()); this.term.loadAddon(gl); } catch { /* DOM renderer */ }
 		this.term.loadAddon(new WebLinksAddon((e, uri) => { if (e.ctrlKey || e.metaKey) window.open(uri, '_blank', 'noopener'); }));
 		this.term.attachCustomKeyEventHandler((e) => {
@@ -100,8 +123,23 @@ export class WebTile {
 	}
 	setCentered(on: boolean): void { this.centered = on; this.el?.toggleClass('centered', on); }
 	setSize(cols: number, rows: number): void {
+		// Fill mode owns the grid: a floor:state echo just repeats the dims WE set (or a stale
+		// value from the race right after taking over) — applying it would fight our own resize.
+		if (this.fillMode) return;
 		if (!this.term || (this.term.cols === cols && this.term.rows === rows)) return;
 		this.term.resize(cols, rows);
+		this.fit();
+	}
+	/** FILL mode on/off (Kane, and the spotlight tile while this browser drives). On: font fixed
+	 *  at BASE_FONT, the grid tracks the box, and each new shape is pushed via deps.resize. Off:
+	 *  back to preview (desktop-owned size, font shrinks); the next floor:state echo re-applies
+	 *  the desktop's dims through setSize. */
+	setFill(on: boolean): void {
+		if (this.fillMode === on) return;
+		this.fillMode = on;
+		this.lastSent = null;
+		if (this.sendTimer !== null) { clearTimeout(this.sendTimer); this.sendTimer = null; }
+		if (on && this.term && this.term.options.fontSize !== BASE_FONT) this.term.options.fontSize = BASE_FONT;
 		this.fit();
 	}
 	setHead(name: string, state: string, locked: boolean): void { this.nameEl?.setText(name); this.stateEl?.setText(state); this.el?.toggleClass('cos-term-lockon', locked); this.el?.setAttr('data-state', state); this.applyRepoLabel(name); }
@@ -126,12 +164,39 @@ export class WebTile {
 	}
 	private fit(): void {
 		if (!this.term || !this.box) return;
+		// Fill mode measures the live element itself (refill), so it must not depend on the
+		// scaled-cell estimate below — which is also unavailable until xterm has laid out once.
+		if (this.fillMode) { this.refill(); return; }
 		const cell = this.measureBaseCell();
 		if (!cell) return;
 		// Tile border 1px a side; .cos-term-body padding 4px a side (styles.css); head above the body.
 		const headH = this.headEl?.offsetHeight ?? 0;
-		const size = fitFontSize({ cols: this.term.cols, rows: this.term.rows, boxW: this.box.w - 2 - 8, boxH: this.box.h - 2 - headH - 8, cell, base: BASE_FONT, min: MIN_FONT });
+		const availW = this.box.w - 2 - 8, availH = this.box.h - 2 - headH - 8;
+		const size = fitFontSize({ cols: this.term.cols, rows: this.term.rows, boxW: availW, boxH: availH, cell, base: BASE_FONT, min: MIN_FONT });
 		if (this.term.options.fontSize !== size) this.term.options.fontSize = size;
+	}
+	/** Fill mode: the grid comes from xterm's own measurement of the live element at BASE_FONT
+	 *  (clamped to the window the server accepts), applied locally at once and pushed to the
+	 *  desktop debounced+deduped — a grip drag fires dozens of box changes, and every PTY resize
+	 *  makes ConPTY repaint the whole screen. */
+	private refill(): void {
+		if (!this.term) return;
+		if (this.term.options.fontSize !== BASE_FONT) this.term.options.fontSize = BASE_FONT;
+		const proposed = this.fitAddon?.proposeDimensions();
+		if (!proposed || !(proposed.cols > 0) || !(proposed.rows > 0)) return;
+		const cols = Math.min(Math.max(proposed.cols, MIN_COLS), MAX_COLS);
+		const rows = Math.min(Math.max(proposed.rows, MIN_ROWS), MAX_ROWS);
+		if (this.term.cols !== cols || this.term.rows !== rows) this.term.resize(cols, rows);
+		if (this.lastSent && this.lastSent.cols === cols && this.lastSent.rows === rows) return;
+		if (this.sendTimer !== null) clearTimeout(this.sendTimer);
+		this.sendTimer = setTimeout(() => {
+			this.sendTimer = null;
+			if (!this.fillMode || !this.term) return;
+			const c = this.term.cols, r = this.term.rows;
+			if (this.lastSent && this.lastSent.cols === c && this.lastSent.rows === r) return;
+			this.lastSent = { cols: c, rows: r };
+			this.deps.resize?.(c, r);
+		}, RESIZE_SEND_MS);
 	}
 	setBadge(text: string | null): void { if (!this.badgeEl) return; this.badgeEl.setText(text ?? ''); this.badgeEl.style.display = text ? 'inline-block' : 'none'; }
 	setPalette(p: Record<string, string>): void {
@@ -182,5 +247,5 @@ export class WebTile {
 	}
 	focus(): void { this.term?.focus(); }
 	blur(): void { this.term?.blur(); }
-	dispose(): void { this.off?.(); this.off = null; this.term?.dispose(); this.term = null; this.el?.remove(); this.el = null; }
+	dispose(): void { if (this.sendTimer !== null) { clearTimeout(this.sendTimer); this.sendTimer = null; } this.off?.(); this.off = null; this.term?.dispose(); this.term = null; this.el?.remove(); this.el = null; }
 }

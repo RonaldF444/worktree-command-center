@@ -69,8 +69,10 @@ export function parseRemoteAction(raw: unknown): RemoteAction | null {
  *  `floor:state` events (not a 2s poll), so the name-must-match guard is not needed here. */
 export type TileInvoke =
 	| { channel: 'floor:state' } | { channel: 'board:get' } | { channel: 'kane:snapshot' } | { channel: 'kane:open' }
-	| { channel: 'tile:snapshot' | 'tile:center' | 'tile:hide' | 'tile:show' | 'tile:kill' | 'tile:lock'; id: number }
+	| { channel: 'tile:snapshot' | 'tile:center' | 'tile:hide' | 'tile:show' | 'tile:kill' | 'tile:lock' | 'tile:release'; id: number }
 	| { channel: 'tile:cycle'; dir: 1 | -1 }
+	| { channel: 'kane:resize'; cols: number; rows: number }
+	| { channel: 'tile:resize'; id: number; cols: number; rows: number }
 	| { channel: 'tile:write'; id: number; data: string }
 	| { channel: 'kane:write'; data: string }
 	| { channel: 'tile:rename'; id: number; name: string }
@@ -80,11 +82,18 @@ export type TileInvoke =
 export const FORWARDED_CHANNELS: ReadonlySet<string> = new Set([
 	'floor:state', 'board:get', 'kane:snapshot', 'kane:open', 'tile:snapshot', 'tile:center', 'tile:hide', 'tile:show', 'tile:kill',
 	'tile:lock', 'tile:cycle', 'tile:write', 'kane:write', 'tile:rename', 'tile:spawn', 'workspace:switch',
+	'kane:resize', 'tile:resize', 'tile:release',
 ]);
+
+/** PTY dims a remote may request. Wide enough for any real screen, tight enough that a hostile
+ *  body can't wedge ConPTY with a degenerate or enormous grid. */
+export const MIN_REMOTE_COLS = 20, MAX_REMOTE_COLS = 400, MIN_REMOTE_ROWS = 5, MAX_REMOTE_ROWS = 200;
+const isDim = (v: unknown, lo: number, hi: number): v is number => typeof v === 'number' && Number.isInteger(v) && v >= lo && v <= hi;
+const isSize = (p: Record<string, unknown>): boolean => isDim(p.cols, MIN_REMOTE_COLS, MAX_REMOTE_COLS) && isDim(p.rows, MIN_REMOTE_ROWS, MAX_REMOTE_ROWS);
 export const MAX_WRITE = 65536;
 export const MAX_NAME = 80;
 
-const ID_CHANNELS = new Set(['tile:snapshot', 'tile:center', 'tile:hide', 'tile:show', 'tile:kill', 'tile:lock']);
+const ID_CHANNELS = new Set(['tile:snapshot', 'tile:center', 'tile:hide', 'tile:show', 'tile:kill', 'tile:lock', 'tile:release']);
 const optStr = (v: unknown, max = 200): string | null => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : null);
 
 export function parseTileInvoke(channel: string, payload: unknown): TileInvoke | null {
@@ -94,6 +103,14 @@ export function parseTileInvoke(channel: string, payload: unknown): TileInvoke |
 	// Alt+←/→ in the browser: a DIRECTION, not a target. The desk owns the ring (it includes the
 	// equal-grid stop and tiles the browser cannot see), so only ±1 is accepted here.
 	if (channel === 'tile:cycle') return p.dir === 1 || p.dir === -1 ? { channel, dir: p.dir } : null;
+	// Remote-driven PTY reshape: while a browser drives the floor, ITS geometry wins for Kane and
+	// the spotlight tile (a wide-short desktop grid can never fill a tall-narrow browser box at a
+	// readable font). The desktop suppresses its own fit until tile:release / disconnect.
+	if (channel === 'kane:resize') return isSize(p) ? { channel, cols: p.cols as number, rows: p.rows as number } : null;
+	if (channel === 'tile:resize') {
+		if (!isTileId(p.id) || !isSize(p)) return null;
+		return { channel, id: p.id, cols: p.cols as number, rows: p.rows as number };
+	}
 	if (channel === 'tile:write') {
 		if (!isTileId(p.id) || typeof p.data !== 'string' || !p.data || p.data.length > MAX_WRITE) return null;
 		return { channel, id: p.id, data: p.data };

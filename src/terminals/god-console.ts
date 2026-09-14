@@ -161,7 +161,9 @@ export class GodConsole {
 		this.fitThrottle = new FitThrottle({
 			// Kane lives in a fixed-width dock (never bubbles), so fit it to its actual size —
 			// no minimum clamp (clamping would clip his own readable content).
-			propose: () => this.fit?.proposeDimensions() ?? null,
+			// While a BROWSER owns the size (remoteSized), propose nothing: the desk's wide-short
+			// dock geometry must not clobber the remote's tall-narrow grid — see resizeTo().
+			propose: () => (this.remoteSized ? null : this.fit?.proposeDimensions() ?? null),
 			apply: (cols, rows) => { this.term?.resize(cols, rows); this.bridge?.resize(cols, rows); },
 		});
 		this.fitSoon();
@@ -327,6 +329,26 @@ export class GodConsole {
 	/** Coalesce resize bursts into a single fit + pty-resize (see FitThrottle). */
 	private fitSoon(): void {
 		this.fitThrottle?.schedule();
+	}
+
+	/** True while a connected browser drives this console's PTY shape (kane:resize). The desk's
+	 *  own fit is suppressed for the duration so the two screens can't fight over the size. */
+	private remoteSized = false;
+
+	/** Browser mirror: reshape the PTY to the REMOTE's geometry. The desk view shows the same
+	 *  grid (possibly clipped in its dock) until releaseRemoteSize() — acceptable while the user
+	 *  is at the other screen; the desk refits itself the moment the browser lets go. */
+	resizeTo(cols: number, rows: number): void {
+		this.remoteSized = true;
+		this.term?.resize(cols, rows);
+		this.bridge?.resize(cols, rows);
+	}
+
+	/** Give the size back to the desk (browser disconnected): refit to the dock. */
+	releaseRemoteSize(): void {
+		if (!this.remoteSized) return;
+		this.remoteSized = false;
+		this.fitSoon();
 	}
 
 	/** Drop a project-level `/personality` slash command + a scoped settings file into Kane's
