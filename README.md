@@ -58,6 +58,11 @@ The installed app still resolves `node.exe`, `git`, and `claude` from PATH at ru
 
 ### Troubleshooting
 
+- **GPU acceleration is OFF by default** — a graphics-driver reset kills Electron's GPU
+  process and the whole floor with it (it happened: LiveKernelEvent 0x193, 2026-09-14), so
+  the app renders in software unless you opt back in. To re-enable the GPU: add
+  `"disableGpu": false` to `%APPDATA%\Worktree Command Center\config.json` (or set
+  `WCC_DISABLE_GPU=0` for one launch), then restart the app — the flag is read at boot.
 - **`Error: Electron failed to install correctly`** — on Windows + Node 24, Electron's
   installer downloads the runtime but its `extract-zip` step fails silently. A
   `postinstall` (`scripts/fix-electron.mjs`) re-extracts it with `Expand-Archive`

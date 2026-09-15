@@ -11,6 +11,7 @@ import { createPortForwarder, type PortForwarder } from './port-forward';
 import { createAuth } from './remote/auth';
 import { createRendererRpc } from './remote/renderer-rpc';
 import { createRemoteHandlers } from './remote/handlers';
+import { shouldDisableGpu } from './gpu-flag';
 import { Worker } from 'worker_threads';
 
 const REMOTE_PORT = 7420;
@@ -42,6 +43,19 @@ app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion');
 // protocol on localhost only, so a CPU profile of the renderer can be captured from
 // outside while the lag is reproducing. Loopback-bound — not reachable off-machine.
 app.commandLine.appendSwitch('remote-debugging-port', '9223');
+
+// GPU acceleration OFF by default (see electron/gpu-flag.ts): a GPU driver reset
+// (LiveKernelEvent 0x193, 2026-09-14) killed the GPU process and the whole floor with it.
+// Software rendering survives driver hiccups. Opt back in with `"disableGpu": false` in
+// config.json, or per-launch with WCC_DISABLE_GPU=0; must run before whenReady(), so a
+// change only takes effect on the next app start.
+try {
+	const cfgRaw = fs.readFileSync(path.join(app.getPath('userData'), 'config.json'), 'utf8');
+	if (shouldDisableGpu(process.env.WCC_DISABLE_GPU, JSON.parse(cfgRaw))) app.disableHardwareAcceleration();
+} catch {
+	// No/unreadable config → the default applies.
+	if (shouldDisableGpu(process.env.WCC_DISABLE_GPU, undefined)) app.disableHardwareAcceleration();
+}
 
 function createWindow(): void {
 	const sidecarDir = app.isPackaged
