@@ -27,6 +27,8 @@ export interface WebTileDeps {
 	resize?: (cols: number, rows: number) => void;
 	/** Ship a pasted image to the host, which saves it and types its path into the session. */
 	pasteImage?: (dataBase64: string, mime: string) => void;
+	/** ⟳ — restart the session in place (kill + relaunch with --continue), like the desk tile. */
+	onRefresh?: () => void;
 }
 
 /** Image types we forward on paste — must match PASTE_MIMES in electron/remote-actions.ts. */
@@ -85,6 +87,8 @@ export class WebTile {
 		this.applyRepoLabel(head.name);
 		this.stateEl = h.createSpan({ cls: 'web-tile-state' });
 		const btns = h.createDiv({ cls: 'cos-term-head-btns' });
+		const refreshBtn = btns.createEl('button', { text: '⟳', cls: 'cos-term-refresh', attr: { title: 'Refresh — reload this session with --continue (keeps the conversation)' } });
+		refreshBtn.addEventListener('click', (e) => { e.stopPropagation(); if (confirm(`Refresh "${this.nameEl?.textContent ?? head.name}"? Reloads the session with --continue.`)) this.deps.onRefresh?.(); });
 		const hideBtn = btns.createEl('button', { text: '–', cls: 'cos-term-hide', attr: { title: 'Hide — keeps the session running; restore from Coordination' } });
 		hideBtn.addEventListener('click', (e) => { e.stopPropagation(); this.deps.onHide(); });
 		const killBtn = btns.createEl('button', { text: '×', attr: { title: 'Close — deletes this worktree + its branch' } });

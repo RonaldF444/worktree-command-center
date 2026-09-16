@@ -69,7 +69,7 @@ export function parseRemoteAction(raw: unknown): RemoteAction | null {
  *  `floor:state` events (not a 2s poll), so the name-must-match guard is not needed here. */
 export type TileInvoke =
 	| { channel: 'floor:state' } | { channel: 'board:get' } | { channel: 'kane:snapshot' } | { channel: 'kane:open' }
-	| { channel: 'tile:snapshot' | 'tile:center' | 'tile:hide' | 'tile:show' | 'tile:kill' | 'tile:lock' | 'tile:release'; id: number }
+	| { channel: 'tile:snapshot' | 'tile:center' | 'tile:hide' | 'tile:show' | 'tile:kill' | 'tile:lock' | 'tile:release' | 'tile:refresh'; id: number }
 	| { channel: 'tile:cycle'; dir: 1 | -1 }
 	| { channel: 'kane:resize'; cols: number; rows: number }
 	| { channel: 'tile:resize'; id: number; cols: number; rows: number }
@@ -84,7 +84,7 @@ export type TileInvoke =
 export const FORWARDED_CHANNELS: ReadonlySet<string> = new Set([
 	'floor:state', 'board:get', 'kane:snapshot', 'kane:open', 'tile:snapshot', 'tile:center', 'tile:hide', 'tile:show', 'tile:kill',
 	'tile:lock', 'tile:cycle', 'tile:write', 'kane:write', 'tile:rename', 'tile:spawn', 'workspace:switch',
-	'kane:resize', 'tile:resize', 'tile:release', 'kane:image', 'tile:image',
+	'kane:resize', 'tile:resize', 'tile:release', 'tile:refresh', 'kane:image', 'tile:image',
 ]);
 
 /** Image types a remote may paste into a session. Whitelisted, not sniffed: the payload is
@@ -106,7 +106,7 @@ const isSize = (p: Record<string, unknown>): boolean => isDim(p.cols, MIN_REMOTE
 export const MAX_WRITE = 65536;
 export const MAX_NAME = 80;
 
-const ID_CHANNELS = new Set(['tile:snapshot', 'tile:center', 'tile:hide', 'tile:show', 'tile:kill', 'tile:lock', 'tile:release']);
+const ID_CHANNELS = new Set(['tile:snapshot', 'tile:center', 'tile:hide', 'tile:show', 'tile:kill', 'tile:lock', 'tile:release', 'tile:refresh']);
 const optStr = (v: unknown, max = 200): string | null => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : null);
 
 export function parseTileInvoke(channel: string, payload: unknown): TileInvoke | null {

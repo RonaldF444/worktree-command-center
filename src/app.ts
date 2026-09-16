@@ -432,6 +432,7 @@ async function main(): Promise<void> {
 					case 'kane:resize': return activeGrid.kaneResize(p.cols, p.rows);
 					case 'tile:resize': return activeGrid.tileResize(p.id, p.cols, p.rows);
 					case 'tile:release': return activeGrid.tileRelease(p.id);
+					case 'tile:refresh': return activeGrid.tileRefresh(p.id);
 					// A remote pasted an image: save it here (claude runs on THIS machine and reads
 					// images by path) and type the path into the session for the user to caption.
 					case 'kane:image': { const f = savePastedImage(p.data, p.mime); return f ? activeGrid.kaneWrite(f) : false; }

@@ -126,7 +126,7 @@ describe('parseTileInvoke', () => {
 	});
 	it('rejects unknown channels and lists the forwarded set', () => {
 		expect(parseTileInvoke('config:set', {})).toBeNull();
-		expect([...FORWARDED_CHANNELS].sort()).toEqual(['board:get', 'floor:state', 'kane:image', 'kane:open', 'kane:resize', 'kane:snapshot', 'kane:write', 'tile:center', 'tile:cycle', 'tile:hide', 'tile:image', 'tile:kill', 'tile:lock', 'tile:release', 'tile:rename', 'tile:resize', 'tile:show', 'tile:snapshot', 'tile:spawn', 'tile:write', 'workspace:switch']);
+		expect([...FORWARDED_CHANNELS].sort()).toEqual(['board:get', 'floor:state', 'kane:image', 'kane:open', 'kane:resize', 'kane:snapshot', 'kane:write', 'tile:center', 'tile:cycle', 'tile:hide', 'tile:image', 'tile:kill', 'tile:lock', 'tile:refresh', 'tile:release', 'tile:rename', 'tile:resize', 'tile:show', 'tile:snapshot', 'tile:spawn', 'tile:write', 'workspace:switch']);
 	});
 
 	it('kane:resize and tile:resize validate integer dims within the accepted window', () => {
@@ -143,6 +143,12 @@ describe('parseTileInvoke', () => {
 	it('tile:release validates a tile id like the other id channels', () => {
 		expect(parseTileInvoke('tile:release', { id: 5 })).toEqual({ channel: 'tile:release', id: 5 });
 		expect(parseTileInvoke('tile:release', {})).toBeNull();
+	});
+
+	it('tile:refresh validates a tile id like the other id channels', () => {
+		expect(parseTileInvoke('tile:refresh', { id: 4 })).toEqual({ channel: 'tile:refresh', id: 4 });
+		expect(parseTileInvoke('tile:refresh', { id: -1 })).toBeNull();
+		expect(parseTileInvoke('tile:refresh', {})).toBeNull();
 	});
 
 	it('image paste takes strict base64 and a whitelisted mime only', () => {

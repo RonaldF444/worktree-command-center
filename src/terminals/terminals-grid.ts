@@ -744,6 +744,9 @@ export class TerminalsGrid {
 	kaneResize(cols: number, rows: number): boolean { if (!this.godConsole) return false; this.godConsole.resizeTo(cols, rows); this.deps.onFloorChange?.(); return true; }
 	tileResize(id: number, cols: number, rows: number): boolean { const t = this.terminalById(id); if (!t) return false; t.resizeTo(cols, rows); this.deps.onFloorChange?.(); return true; }
 	tileRelease(id: number): boolean { const t = this.terminalById(id); if (!t) return false; t.releaseRemoteSize(); return true; }
+	/** Browser ⟳: restart the session in place (kill + relaunch with --continue), exactly like
+	 *  the desk tile's own refresh button. The browser confirms before sending. */
+	tileRefresh(id: number): boolean { const t = this.terminalById(id); if (!t) return false; t.restartInPlace(); return true; }
 	releaseRemoteSizes(): void {
 		for (const t of [...this.tiles, ...this.hidden]) if (!t.isJournal) (t as TerminalTile).releaseRemoteSize();
 		this.godConsole?.releaseRemoteSize();
