@@ -5,6 +5,7 @@ import { WebLinksAddon } from '@xterm/addon-web-links';
 import { scrollIntentForKey, scrollKeySequence } from '../terminals/scroll-keys';
 import { activeTerminalFont } from '../terminals/theme-store';
 import { fitFontSize, repoLabel } from './fit';
+import { copyText, browserCopyDeps, type CopyDeps } from './clipboard';
 
 const BASE_FONT = 12;
 // Preview floor. 4px is unreadable on purpose: side tiles are previews, and a smaller floor means
@@ -69,6 +70,8 @@ export class WebTile {
 	 *  overflowed its tile). proposeDimensions() measures the live element the same way the
 	 *  desktop's FitThrottle does. */
 	private fitAddon: FitAddon | null = null;
+	/** Built once: the Clipboard API is only probed at construction, not on every keystroke. */
+	private readonly copyDeps: CopyDeps = browserCopyDeps();
 
 	constructor(private deps: WebTileDeps) {}
 
@@ -109,7 +112,15 @@ export class WebTile {
 		this.term.loadAddon(new WebLinksAddon((e, uri) => { if (e.ctrlKey || e.metaKey) window.open(uri, '_blank', 'noopener'); }));
 		this.term.attachCustomKeyEventHandler((e) => {
 			if (e.type !== 'keydown') return true;
-			if ((e.ctrlKey || e.metaKey) && (e.key === 'c' || e.key === 'C') && this.term?.hasSelection()) { void navigator.clipboard?.writeText(this.term.getSelection()); return false; }
+			// Copy the selection. navigator.clipboard alone silently did nothing here: the gateway
+			// is plain http, which is not a secure context, so the API is undefined — copyText
+			// falls back to execCommand, which still works. No selection => fall through so ^C
+			// reaches claude as the interrupt, exactly like the desk tile.
+			if ((e.ctrlKey || e.metaKey) && (e.key === 'c' || e.key === 'C') && this.term?.hasSelection()) {
+				const sel = this.term.getSelection();
+				void copyText(sel, this.copyDeps).then((ok) => { if (ok) this.term?.clearSelection(); });
+				return false;
+			}
 			if ((e.ctrlKey || e.metaKey) && (e.key === 'v' || e.key === 'V')) { void navigator.clipboard?.readText().then((t) => { if (t) this.deps.write(t); }); return false; }
 			const intent = scrollIntentForKey(e);
 			if (intent) {
