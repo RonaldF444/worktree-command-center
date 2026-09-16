@@ -66,6 +66,23 @@ function replay(src: MouseEvent, shift: boolean): MouseEvent {
 	return e;
 }
 
+/** After a selection gesture ends, the browser still fires a native `click` for the press —
+ *  and the tiles' click-to-center handlers treat it as "center me", which (in the browser
+ *  mirror) fills + RESIZES the tile, and xterm clears the selection on a row change. That is
+ *  exactly the "unhighlights the second I let go" bug. A drag is not a click: arm a one-shot
+ *  capture listener at release that eats that single click before anyone reacts to it. */
+function swallowGestureClick(): void {
+	const arm = () => {
+		const eat = (c: MouseEvent) => { c.stopImmediatePropagation(); c.preventDefault(); };
+		window.addEventListener('click', eat, { capture: true, once: true });
+		// A release with no click after it (e.g. release over a different element) must not
+		// leave the eater armed for some future real click.
+		setTimeout(() => window.removeEventListener('click', eat, true), 500);
+	};
+	window.addEventListener('mouseup', arm, { capture: true, once: true });
+	setTimeout(() => window.removeEventListener('mouseup', arm, true), 30_000);
+}
+
 /** Wire plain-drag selection onto a terminal body. Registered in the CAPTURE phase, so it
  *  must be attached AFTER any focus-guard capture listener on the same element (a guard's
  *  stopImmediatePropagation then still wins for unfocused tiles). */
@@ -79,6 +96,7 @@ export function attachDragSelect(el: HTMLElement, deps: DragSelectDeps): void {
 		down.stopImmediatePropagation();
 		if (action === 'select') { // double/triple click — word/line select right away
 			deps.clearSelection();
+			swallowGestureClick();
 			target.dispatchEvent(replay(down, true));
 			return;
 		}
@@ -92,6 +110,7 @@ export function attachDragSelect(el: HTMLElement, deps: DragSelectDeps): void {
 			if (!isDrag(move.clientX - down.clientX, move.clientY - down.clientY)) return;
 			done();
 			deps.clearSelection();
+			swallowGestureClick();
 			// Shift+press at the ORIGINAL coords anchors the selection where the drag began;
 			// xterm registers its document-level drag listeners synchronously in here, so the
 			// real mousemoves from now on (this one included) extend the selection.
