@@ -6,6 +6,7 @@ import { settledLayout, centeredLayout, keyForIndex, keyToIndex } from '../termi
 import { SPAWN_MODELS, SPAWN_EFFORTS } from '../terminals/spawn-options';
 import { normalizeTheme, setActiveTheme, activeTerminalPalette } from '../terminals/theme-store';
 import type { FloorState } from '../terminals/floor-state';
+import { planFillTransition } from './fill-plan';
 import { toast } from '../ui/toast';
 
 const GAP = 8;
@@ -19,13 +20,26 @@ export function mountFloor(root: HTMLElement, bridge: Bridge): () => void {
 	let kane: WebTile | null = null;
 	let kaneOpen = false;
 	let altDown = false;
+	/** Manual-read fill: the tile the USER deliberately centred (click / Alt-jump / ports badge)
+	 *  gets the readable browser shape — safe, because that same action pins the desk's spotlight
+	 *  for 30s, so no churn. Spotlight moves driven by the DESK (FIFO auto-centering, Alt-cycling)
+	 *  never fill: auto-reshaping whatever the desk bubbles was the 09-16 repaint storm. */
+	let filledId: number | null = null;   // tile currently browser-shaped
+	let wantFillId: number | null = null; // centre WE requested, filled once floor:state confirms it
+	let wantFillAt = 0;                   // when it was requested — a confirm that never comes must not fire later
+	const WANT_FILL_TTL_MS = 10_000;
+	const requestCenter = (id: number): void => {
+		wantFillId = id;
+		wantFillAt = Date.now();
+		void bridge.invoke('tile:center', { id }).catch(() => { if (wantFillId === id) wantFillId = null; toast('Could not focus the terminal'); });
+	};
 
 	// --- chrome ---
 	const top = root.createDiv({ cls: 'wcc-topbar' });
 	top.createSpan({ cls: 'wcc-brand', text: '🌳 Worktree Command Center · browser' });
 	const status = top.createSpan({ cls: 'wcc-status', text: '' });
 	const usage = top.createSpan({ cls: 'wcc-usage-session web-usage', text: '' });
-	const ports = new WebPortsWidget({ onCenter: (id) => void bridge.invoke('tile:center', { id }), pageHost: () => location.hostname });
+	const ports = new WebPortsWidget({ onCenter: (id) => requestCenter(id), pageHost: () => location.hostname });
 	ports.render(top);
 	const logout = top.createEl('button', { text: 'Sign out' });
 	logout.addEventListener('click', () => bridge.logout());
@@ -92,7 +106,7 @@ export function mountFloor(root: HTMLElement, bridge: Bridge): () => void {
 		snapshot: () => bridge.invoke<string>(id === 'kane' ? 'kane:snapshot' : 'tile:snapshot', id === 'kane' ? undefined : { id }),
 		write: (data: string) => { void bridge.invoke(id === 'kane' ? 'kane:write' : 'tile:write', id === 'kane' ? { data } : { id, data }).catch(() => {}); },
 		onData: (cb: (chunk: string) => void) => bridge.on('tile:data', (p) => { const m = p as { key: string; chunk: string }; if (m.key === key(id)) cb(m.chunk); }),
-		onClick: () => { if (id !== 'kane') void bridge.invoke('tile:center', { id }); },
+		onClick: () => { if (id !== 'kane') requestCenter(id); },
 		onRename: (name: string) => { if (id !== 'kane') void bridge.invoke('tile:rename', { id, name }); },
 		onHide: () => { if (id !== 'kane') void bridge.invoke('tile:hide', { id }); },
 		onKill: () => { if (id !== 'kane') void bridge.invoke('tile:kill', { id }); },
@@ -190,8 +204,10 @@ export function mountFloor(root: HTMLElement, bridge: Bridge): () => void {
 		state = next;
 		// A workspace switch replaces every session, so the old tiles AND the old Kane go. Kane is
 		// rebuilt below by ensureKane() if the new workspace has one; the dock stays open either
-		// way so the toggle state survives the switch.
-		if (prevWs !== undefined && prevWs !== next.workspaceId) { for (const t of tiles.values()) t.dispose(); tiles.clear(); kane?.dispose(); kane = null; }
+		// way so the toggle state survives the switch. Fill trackers reset WITHOUT sending a
+		// release — tile ids are per-workspace, so a release now would hit an unrelated tile in
+		// the NEW workspace; the desk sweeps stale remote sizes itself on switch/disconnect.
+		if (prevWs !== undefined && prevWs !== next.workspaceId) { for (const t of tiles.values()) t.dispose(); tiles.clear(); kane?.dispose(); kane = null; filledId = null; wantFillId = null; }
 		// theme
 		const themeId = normalizeTheme(next.theme);
 		if (document.documentElement.dataset.theme !== themeId) { document.documentElement.dataset.theme = themeId; setActiveTheme(themeId); const p = activeTerminalPalette(); for (const t of tiles.values()) t.setPalette(p); kane?.setPalette(p); }
@@ -224,15 +240,30 @@ export function mountFloor(root: HTMLElement, bridge: Bridge): () => void {
 		}
 		for (const info of next.terminals) { const t = tiles.get(info.id); if (!t) continue; t.setSize(info.cols, info.rows); t.setHead(info.name, info.state, info.locked); }
 		if (next.kane && kane) kane.setSize(next.kane.cols, next.kane.rows);
-		// Stage tiles are ALWAYS previews (desktop-owned size, font shrinks to fit). Only Kane
-		// runs in fill mode: his dock is stable, so his shape changes only when the user drags
-		// the grip. The spotlight tile briefly ran in fill mode too (2026-09-13..15) and it was
-		// a disaster: FIFO auto-centering moves the spotlight constantly, so every bubble fired
-		// a browser-shape resize + a desk-shape refit — two full ConPTY repaints per move, on a
-		// 26-session floor. The floor turned into a glitching, lagging repaint storm, historical
-		// output stayed wrapped at whatever width it was printed under, and the constant repaints
-		// made every tile look busy so the ready-queue never rotated (FIFO "stopped"). Never
-		// auto-reshape a PTY whose spotlight the desk moves on its own.
+		// FILL is manual-only for stage tiles. Auto-following the spotlight (2026-09-13..15) was
+		// a disaster — FIFO auto-centering moves the spotlight constantly, and reshaping every
+		// bubble turned the floor into a ConPTY repaint storm (glitch, lag, ready-queue frozen).
+		// But pure preview (2026-09-16 morning) meant a FOCUSED tile mirrored the desk's big
+		// centred grid at an unreadably tiny font. The middle: only a centre the USER asked for
+		// (requestCenter — click / Alt-jump / ports badge) fills, once the desk confirms it; that
+		// same action pins the desk spotlight for 30s, so there is nothing to churn against. Any
+		// spotlight move off the filled tile releases it (one refit) and fills nothing new.
+		const plan = planFillTransition({
+			filledId,
+			wantFillId,
+			wantExpired: wantFillId !== null && Date.now() - wantFillAt > WANT_FILL_TTL_MS,
+			centeredId: next.centeredId,
+		});
+		if (plan.release !== null) {
+			tiles.get(plan.release)?.setFill(false);
+			void bridge.invoke('tile:release', { id: plan.release }).catch(() => { /* desk refits on disconnect anyway */ });
+			filledId = null;
+		}
+		if (plan.fill !== null) {
+			const t = tiles.get(plan.fill);
+			if (t) { t.setFill(true); filledId = plan.fill; }
+		}
+		if (plan.clearWant) wantFillId = null;
 		// A Kane created on the desk after the dock was opened — or rebuilt after a workspace
 		// switch disposed the old one — has no other path into the dock.
 		ensureKane();
@@ -296,7 +327,7 @@ export function mountFloor(root: HTMLElement, bridge: Bridge): () => void {
 		if (e.key === 'l' || e.key === 'L') { e.preventDefault(); e.stopPropagation(); if (state.centeredId !== null) act('tile:lock', { id: state.centeredId }); return; }
 		const norm = e.key.length === 1 ? e.key.toUpperCase() : e.key;
 		const idx = keyToIndex(norm);
-		if (idx !== null && visible[idx] !== undefined) { e.preventDefault(); e.stopPropagation(); act('tile:center', { id: visible[idx] }); }
+		if (idx !== null && visible[idx] !== undefined) { e.preventDefault(); e.stopPropagation(); requestCenter(visible[idx]!); }
 	};
 	const onKeyUp = (e: KeyboardEvent): void => { if (e.key === 'Alt') { altDown = false; for (const t of tiles.values()) t.setBadge(null); } };
 	document.addEventListener('keydown', onKeyDown, true);

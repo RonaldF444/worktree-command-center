@@ -7,3 +7,5 @@ pty-sidecar/contexts/
 .DS_Store
 .superpowers/
 /private/
+
+.cos-ready

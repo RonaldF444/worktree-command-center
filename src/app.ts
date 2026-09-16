@@ -267,6 +267,9 @@ async function main(): Promise<void> {
 
 		async function switchTo(id: string): Promise<void> {
 			if (id === activeId || !workspaces.some((w) => w.id === id)) return;
+			// The browser cannot safely release its remote-shaped PTYs across a switch (tile ids
+			// are per-workspace), so the OUTGOING grid gives every size back to the desk here.
+			activeGrid.releaseRemoteSizes();
 			activeGrid.unmount();
 			activeId = id;
 			activeGrid = gridFor(id);
