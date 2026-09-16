@@ -7,7 +7,7 @@ import * as path from 'path';
 import { SessionBridge, safeSessionEnv } from './session-bridge';
 import { readClipboardText, writeClipboardText } from './clipboard';
 import { removeWorktreeAndBranch, terminalSystemPrompt, worktreeSettingsPath, type WorktreeInfo } from './worktree-manager';
-import { scrollIntentForKey, type ScrollIntent } from './scroll-keys';
+import { scrollIntentForKey, scrollKeySequence, type ScrollIntent } from './scroll-keys';
 import { FitThrottle } from './fit-throttle';
 import { HiddenOutputBuffer } from './hidden-buffer';
 import { isUserInput } from './ready-queue';
@@ -475,14 +475,7 @@ export class TerminalTile implements StageTile {
 	 *  Claude's native scroll keys and send them down the PTY — PgUp/PgDn for up/down, Ctrl+Home /
 	 *  Ctrl+End for top/bottom (Claude's defaults: scroll:pageUp/Down, scroll:top/bottom). */
 	private sendScrollKey(intent: ScrollIntent): void {
-		let seq: string;
-		if (intent.kind === 'top') seq = '\x1b[1;5H';                 // Ctrl+Home -> scroll to top
-		else if (intent.kind === 'bottom') seq = '\x1b[1;5F';         // Ctrl+End  -> scroll to bottom
-		else if (intent.kind === 'pages') seq = intent.amount < 0 ? '\x1b[5~' : '\x1b[6~';  // PgUp / PgDn
-		// Line scroll (Shift+Up/Down): one SGR mouse-wheel tick = scroll:lineUp/Down, which moves
-		// CLAUDE_CODE_SCROLL_SPEED (default 3) lines — matching the old 3-line xterm scroll, not a page.
-		else seq = intent.amount < 0 ? '\x1b[<64;1;1M' : '\x1b[<65;1;1M';  // wheel up / down
-		this.bridge?.write(seq);
+		this.bridge?.write(scrollKeySequence(intent));
 	}
 
 	/** Does the running TUI track the mouse (DECSET 1000/1002/1003)? If so it receives our

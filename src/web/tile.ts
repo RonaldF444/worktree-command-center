@@ -2,7 +2,7 @@ import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebglAddon } from '@xterm/addon-webgl';
 import { WebLinksAddon } from '@xterm/addon-web-links';
-import { scrollIntentForKey } from '../terminals/scroll-keys';
+import { scrollIntentForKey, scrollKeySequence } from '../terminals/scroll-keys';
 import { activeTerminalFont } from '../terminals/theme-store';
 import { fitFontSize, repoLabel } from './fit';
 
@@ -112,7 +112,18 @@ export class WebTile {
 			if ((e.ctrlKey || e.metaKey) && (e.key === 'c' || e.key === 'C') && this.term?.hasSelection()) { void navigator.clipboard?.writeText(this.term.getSelection()); return false; }
 			if ((e.ctrlKey || e.metaKey) && (e.key === 'v' || e.key === 'V')) { void navigator.clipboard?.readText().then((t) => { if (t) this.deps.write(t); }); return false; }
 			const intent = scrollIntentForKey(e);
-			if (intent) { if (intent.kind === 'lines') this.term?.scrollLines(intent.amount); else if (intent.kind === 'pages') this.term?.scrollPages(intent.amount); else if (intent.kind === 'top') this.term?.scrollToTop(); else this.term?.scrollToBottom(); return false; }
+			if (intent) {
+				// Claude's flicker-free TUI lives in the ALTERNATE screen buffer, so this mirror has
+				// no scrollback to move and scrollLines() silently did nothing — Shift+arrow looked
+				// dead in the browser while working on the desk. Forward the intent to the running
+				// TUI instead, exactly as the desktop tile does.
+				if (this.term?.buffer.active.type === 'alternate') this.deps.write(scrollKeySequence(intent));
+				else if (intent.kind === 'lines') this.term?.scrollLines(intent.amount);
+				else if (intent.kind === 'pages') this.term?.scrollPages(intent.amount);
+				else if (intent.kind === 'top') this.term?.scrollToTop();
+				else this.term?.scrollToBottom();
+				return false;
+			}
 			return true;
 		});
 		this.term.onData((d) => this.deps.write(d)); // everything forwarded, like the desktop (focus/DSR replies included)
