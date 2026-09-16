@@ -3,6 +3,7 @@ import { FitAddon } from '@xterm/addon-fit';
 import { WebglAddon } from '@xterm/addon-webgl';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { scrollIntentForKey, scrollKeySequence } from '../terminals/scroll-keys';
+import { attachDragSelect } from '../terminals/drag-select';
 import { activeTerminalFont } from '../terminals/theme-store';
 import { fitFontSize, repoLabel } from './fit';
 import { copyText, browserCopyDeps, type CopyDeps } from './clipboard';
@@ -110,6 +111,13 @@ export class WebTile {
 		this.term.loadAddon(this.fitAddon);
 		try { const gl = new WebglAddon(); gl.onContextLoss(() => gl.dispose()); this.term.loadAddon(gl); } catch { /* DOM renderer */ }
 		this.term.loadAddon(new WebLinksAddon((e, uri) => { if (e.ctrlKey || e.metaKey) window.open(uri, '_blank', 'noopener'); }));
+		// Plain drag selects text even while Claude's TUI tracks the mouse (clicks still reach
+		// the TUI). Without this, selecting required the undiscoverable Shift+drag. Attached
+		// after the centre-guard above so an unfocused stage tile still just focuses.
+		attachDragSelect(body, {
+			tuiOwnsMouse: () => (this.term?.modes.mouseTrackingMode ?? 'none') !== 'none',
+			clearSelection: () => this.term?.clearSelection(),
+		});
 		this.term.attachCustomKeyEventHandler((e) => {
 			if (e.type !== 'keydown') return true;
 			// Copy the selection. navigator.clipboard alone silently did nothing here: the gateway
